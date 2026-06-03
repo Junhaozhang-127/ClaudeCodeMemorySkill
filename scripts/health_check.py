@@ -29,9 +29,16 @@ def _err(msg) -> dict:
 
 def check_project_structure() -> list[dict]:
     results = []
-    for name in ["scripts", "hooks", "memory", "docs", "tests", "plugin.json"]:
+    for name in ["scripts", "hooks", "memory", "docs", "tests",
+                 "plugin.json", "SKILL.md", "README.md"]:
         p = PROJECT_ROOT / name
         results.append({"item": name, "exists": p.exists(), "status": "OK" if p.exists() else "WARNING"})
+    # version check
+    try:
+        from version import __version__, PHASE
+        results.append({"item": "version", "value": f"v{__version__} ({PHASE})", "status": "OK"})
+    except ImportError:
+        results.append({"item": "version", "status": "ERROR", "message": "无法读取 version.py"})
     return results
 
 
@@ -157,9 +164,17 @@ def main() -> None:
     parser.add_argument("--fix", action="store_true")
     args = parser.parse_args()
 
+    # plugin manifest 状态检查
+    try:
+        plugin_data = json.loads((PROJECT_ROOT / "plugin.json").read_text(encoding="utf-8"))
+        plugin_status = plugin_data.get("plugin_status", "missing")
+    except Exception:
+        plugin_status = "error"
+
     report = {
         "project_structure": check_project_structure(),
         "python_env": check_python_env(),
+        "plugin_manifest_status": plugin_status,
         "logs": check_logs(),
     }
 

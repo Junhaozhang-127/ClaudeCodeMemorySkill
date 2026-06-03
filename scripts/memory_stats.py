@@ -42,10 +42,19 @@ def stats_for_workspace(workspace: str = "") -> dict:
     archive_dir = index_file.parent / "archive"
     archives = list(archive_dir.rglob("*.md")) if archive_dir.exists() else []
 
+    # 检测 index 中记录但文件缺失
+    missing = 0
+    for r in index.values():
+        f = r.get("file", "")
+        if f and not (PROJECT_ROOT / f).exists():
+            missing += 1
+
     return {
         "workspace": workspace or "default (legacy)",
+        "is_empty": len(index) == 0 and len(topics) == 0,
         "index_entries": len(index),
         "topics_files": len(topics),
+        "missing_files": missing,
         "total_size_bytes": total_size,
         "backups_count": len(backups),
         "archived_count": len(archives),
@@ -84,9 +93,15 @@ def main() -> None:
 
 def _print_one(st: dict) -> None:
     print(f"Workspace: {st['workspace']}")
+    if st.get("is_empty"):
+        print("  (空记忆库 — 尚未保存任何记忆)")
+        print(f"  运行 'python scripts/summarize_session.py --topic \"主题\" --text \"内容\"' 开始使用。")
+        return
     print(f"  Index entries:  {st['index_entries']}")
     print(f"  Topics files:   {st['topics_files']}")
     print(f"  Total size:     {st['total_size_bytes']:,} bytes")
+    if st.get("missing_files"):
+        print(f"  ⚠ 缺失文件:    {st['missing_files']} 个（index 中有记录但文件不存在）")
     print(f"  Backups:        {st['backups_count']}")
     print(f"  Archived:       {st['archived_count']}")
     print(f"  Latest update:  {st['latest_update'] or 'N/A'}")

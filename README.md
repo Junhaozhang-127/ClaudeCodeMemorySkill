@@ -134,6 +134,26 @@ python scripts/install.py --interactive  # 交互式生成
 | `docs/settings.template.json` | Hook 配置模板 |
 | `docs/config.example.json` | 配置文件示例 |
 
+## 已知限制
+
+- **Plugin Manifest**：`plugin.json` 当前是 manifest-template，未经过 Claude Code 官方插件运行时验证
+- **Slash Command**：当前通过 SKILL.md / plugin.json 声明式映射到 CLI 脚本，不是完整官方 commands 目录实现
+- **EmbeddingRetriever**：当前为 stub，不提供真正的语义向量检索。检索主要依赖关键词 + 多字段加权评分
+- **存储**：本地 Markdown + JSON 文件存储，不提供多用户并发数据库
+
+详见 `LIMITATIONS.md`。
+
+## 安全与隐私
+
+- 所有记忆默认保存在本地，不会上传到任何远程服务
+- 请勿在对话中暴露 API Key、密码、Token 等敏感信息
+- 可通过 `scripts/memory_maintenance.py` 维护或清理记忆
+- 日志不记录完整对话原文
+
+## 仓库说明
+
+当前仓库名为 `ClaudeMeory`（历史原因）。项目显示名称统一为 **Claude Code Memory Skill**。
+
 ## License
 
 MIT — 详见 `LICENSE`

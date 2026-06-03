@@ -73,4 +73,8 @@ else
     exit 1
 fi
 
+if [ $? -ne 0 ]; then
+    echo "[Memory Hook] 保存失败 — Python 脚本返回错误" >&2
+    exit 1
+fi
 echo "[Memory Hook] 记忆保存完成：$TOPIC"

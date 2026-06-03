@@ -73,6 +73,23 @@ def _get_env_workspace() -> str:
     return ""
 
 
+def _validate_workspace_name(name: str) -> str:
+    """校验 workspace 名称安全性。
+
+    Raises:
+        ValueError: 名称包含危险字符或路径穿越。
+    """
+    if not name or name == "default":
+        return name
+    if ".." in name:
+        raise ValueError(f"workspace 名称不允许包含 '..': {name}")
+    if name.startswith("/") or name.startswith("\\"):
+        raise ValueError(f"workspace 名称不允许为绝对路径: {name}")
+    if any(c in name for c in ("/", "\\", ":", "*", "?", "\"", "<", ">", "|")):
+        raise ValueError(f"workspace 名称包含非法字符: {name}")
+    return name
+
+
 def _resolve_paths(workspace: str = ""):
     """根据 workspace_id 解析记忆目录路径。
 
@@ -83,6 +100,7 @@ def _resolve_paths(workspace: str = ""):
         workspace = _get_env_workspace()
     if not workspace or workspace == "default":
         return MEMORY_DIR, TOPICS_DIR, INDEX_FILE
+    workspace = _validate_workspace_name(workspace)
     base = MEMORY_DIR / "workspaces" / workspace
     return base, base / "topics", base / "index.json"
 
@@ -169,15 +187,39 @@ def slugify_topic(topic: str) -> str:
 def load_index(workspace: str = "") -> dict:
     _, _, index_file = _resolve_paths(workspace)
     try:
-        return json.loads(index_file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, FileNotFoundError):
+        raw = index_file.read_text(encoding="utf-8")
+        if not raw.strip():
+            log_warning(f"index.json 为空文件: {index_file}")
+            return {}
+        return json.loads(raw)
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError:
+        # 备份损坏文件
+        _backup_corrupt_index(index_file)
         # 尝试从备份恢复
         recovered = _try_restore_from_backup(index_file)
         if recovered is not None:
             log_warning(f"index.json 已损坏，已从备份恢复: {index_file}")
             return recovered
-        log_warning(f"index.json 损坏且无可用备份: {index_file}")
+        log_warning(f"index.json 损坏且无可用备份，已创建空索引: {index_file}")
+        # 重新创建空索引
+        index_file.write_text("{}", encoding="utf-8")
         return {}
+
+
+def _backup_corrupt_index(index_file: Path) -> None:
+    """将损坏的 index.json 重命名为 .corrupt 文件保留现场。"""
+    if not index_file.exists():
+        return
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    corrupt_path = index_file.with_name(f"index.corrupt.{ts}.json")
+    try:
+        import shutil
+        shutil.copy2(str(index_file), str(corrupt_path))
+        log_warning(f"损坏的 index.json 已备份到: {corrupt_path}")
+    except OSError:
+        pass
 
 
 def _try_restore_from_backup(index_file: Path) -> dict | None:
