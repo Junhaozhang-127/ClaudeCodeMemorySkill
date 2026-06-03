@@ -19,6 +19,9 @@ Claude Code 默认每个会话相互独立。当开发者切换会话或重新�
 - **上下文注入**：优先输出摘要、关键决策、待办事项，原始对话作为低优先级补充
 - **索引重建**：从 Markdown 文件恢复 `index.json`，兼容新旧 Markdown 格式
 - **零数据库依赖**：纯文件存储，Markdown + JSON，人工可读、Git 友好、易于迁移
+- **Hook 自动化**：会话结束自动保存、用户输入前自动检索（支持 bash/bat/ps1）
+- **Slash Command**：`/memory save`、`/memory retrieve`、`/memory rebuild` 对话内命令
+- **Plugin 打包**：`plugin.json` 清单，一键安装脚本 `install.sh`
 
 ## 项目结构
 
@@ -36,8 +39,14 @@ ClaudeMeory/
 │   ├── retrieve_memory.py            # 检索记忆 CLI 入口
 │   └── update_index.py               # 重建索引 CLI 入口
 ├── hooks/
-│   ├── post_conversation_example.sh  # 会话后写入记忆 Hook 示例
-│   └── pre_prompt_example.sh         # 用户输入前检索记忆 Hook 示例
+│   ├── post_conversation.sh           # 会话后写入 Hook (bash)
+│   ├── pre_prompt.sh                  # 用户输入前检索 Hook (bash)
+│   ├── post_conversation.bat          # Windows CMD 版本
+│   ├── pre_prompt.bat                 # Windows CMD 版本
+│   ├── post_conversation.ps1          # PowerShell 版本
+│   ├── pre_prompt.ps1                 # PowerShell 版本
+│   ├── post_conversation_example.sh   # 旧版示例（保留兼容）
+│   └── pre_prompt_example.sh          # 旧版示例（保留兼容）
 ├── memory/
 │   ├── index.json                    # 主题索引
 │   └── topics/                       # Markdown 记忆存储目录
@@ -181,13 +190,35 @@ python tests/test_memory_skill.py
 | Hook 接入 | 示例脚本需按实际 Claude Code Hook 规范适配 | 第三阶段 |
 | 决策/待办抽取 | 依赖触发词表，可能漏检或误检 | 第三阶段（LLM 增强） |
 
+## Plugin 安装
+
+### 一键安装
+
+```bash
+git clone https://github.com/Junhaozhang-127/ClaudeMeory.git
+cd ClaudeMeory
+bash install.sh --with-jieba
+```
+
+### Hook 配置
+
+将 `docs/settings.template.json` 中的 Hook 配置合并到 Claude Code 的 `settings.json`。
+
+### Slash Commands
+
+```
+/memory save <主题>      — 保存当前对话记忆
+/memory retrieve <查询>  — 检索相关历史记忆
+/memory rebuild           — 重建记忆索引
+```
+
 ## 后续计划
 
 详见 `docs/DEVELOPMENT_ROADMAP.md`，四个阶段：
 
-1. **第一阶段**（已完成）：工程化整理、文档完善、测试补全
-2. **第二阶段**（已完成）：规则摘要器、中文关键词增强、决策/待办抽取、检索评分优化
-3. **第三阶段**：Claude Code Hook / Skill / Plugin 生态正式接入，LLM 摘要器
+1. **第一阶段**（已完成 ✅）：工程化整理、文档完善、测试补全
+2. **第二阶段**（已完成 ✅）：规则摘要器、中文关键词增强、决策/待办抽取、检索评分优化
+3. **第三阶段**（已完成 ✅）：Claude Code Hook / Skill / Plugin 生态正式接入
 4. **第四阶段**：向量检索、记忆合并、项目隔离、日志系统
 
 ## 常见问题 (FAQ)

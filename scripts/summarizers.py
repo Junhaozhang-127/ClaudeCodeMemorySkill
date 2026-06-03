@@ -65,13 +65,14 @@ class BaseSummarizer(ABC):
 
 _DECISION_TRIGGERS = re.compile(
     r"(决定|确定|采用|选择|保持|不再|改为|结论|同意|确认|最终|方案|"
-    r"confirmed|decided|decision|use|choose|finalize|agree|conclusion)",
+    r"\bconfirmed\b|\bdecided\b|\bdecision\b|\buse\b|\bchoose\b|"
+    r"\bfinalize\b|\bagree\b|\bconclusion\b)",
     re.IGNORECASE,
 )
 
 _TODO_TRIGGERS = re.compile(
     r"(需要|下一步|待办|修复|补充|优化|增加|测试|检查|实现|完善|"
-    r"TODO|FIXME|HACK|XXX|"
+    r"\bTODO\b|\bFIXME\b|\bHACK\b|\bXXX\b|"
     r"\bfix\b|\badd\b|\btest\b|\bcheck\b|\bimplement\b|\bupdate\b|\bremove\b)",
     re.IGNORECASE,
 )

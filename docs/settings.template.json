@@ -1,0 +1,71 @@
+{
+  "_comment": "Claude Code Memory Skill — Hook 配置模板。将此内容合并到你的 settings.json 中。",
+  "_note": "事件名和变量名请根据你的 Claude Code 版本实际 Hook 规范调整。",
+
+
+  "hooks": {
+
+    "Stop": [
+      {
+        "matcher": "",
+        "command": "bash \"${CLAUDE_PROJECT_DIR}/hooks/post_conversation.sh\""
+      }
+    ],
+
+
+    "PrePrompt": [
+      {
+        "matcher": "",
+        "command": "bash \"${CLAUDE_PROJECT_DIR}/hooks/pre_prompt.sh\" \"${CLAUDE_USER_INPUT}\""
+      }
+    ]
+  },
+
+  "_windows_alternative_bat": {
+    "_comment": "Windows 用户使用 .bat 版本（不含 bash）：",
+    "hooks": {
+      "Stop": [
+        {
+          "command": "cmd /c \"${CLAUDE_PROJECT_DIR}\\hooks\\post_conversation.bat\""
+        }
+      ],
+      "PrePrompt": [
+        {
+          "command": "cmd /c \"${CLAUDE_PROJECT_DIR}\\hooks\\pre_prompt.bat\" \"${CLAUDE_USER_INPUT}\""
+        }
+      ]
+    }
+  },
+
+  "_windows_alternative_ps1": {
+    "_comment": "PowerShell 用户使用 .ps1 版本：",
+    "hooks": {
+      "Stop": [
+        {
+          "command": "powershell -ExecutionPolicy Bypass -File \"${CLAUDE_PROJECT_DIR}\\hooks\\post_conversation.ps1\""
+        }
+      ],
+      "PrePrompt": [
+        {
+          "command": "powershell -ExecutionPolicy Bypass -File \"${CLAUDE_PROJECT_DIR}\\hooks\\pre_prompt.ps1\" -Query \"${CLAUDE_USER_INPUT}\""
+        }
+      ]
+    }
+  },
+
+  "_cross_platform_python_direct": {
+    "_comment": "跨平台方案：直接调用 Python（不依赖 bash/powershell）：",
+    "hooks": {
+      "Stop": [
+        {
+          "command": "python \"${CLAUDE_PROJECT_DIR}/scripts/summarize_session.py\" --topic \"${CLAUDE_CONVERSATION_TITLE}\" --text \"${CLAUDE_CONVERSATION_CONTENT}\""
+        }
+      ],
+      "PrePrompt": [
+        {
+          "command": "python \"${CLAUDE_PROJECT_DIR}/scripts/retrieve_memory.py\" --query \"${CLAUDE_USER_INPUT}\" --top-k 5"
+        }
+      ]
+    }
+  }
+}

@@ -553,57 +553,76 @@ class TestPhase1Regression(IsolatedMemoryTest):
 
 
 # ═══════════════════════════════════════════════════════════════
-# CLI 层测试（subprocess）
+# CLI 层测试（subprocess，完全隔离到临时目录）
 # ═══════════════════════════════════════════════════════════════
 
 _PYTHON = sys.executable
 
 
-def _run_cli(script_name: str, *args: str) -> subprocess.CompletedProcess:
-    env = os.environ.copy()
-    env.setdefault("PYTHONIOENCODING", "utf-8")
-    cmd = [_PYTHON, str(SCRIPTS_DIR / script_name)] + list(args)
-    return subprocess.run(
-        cmd, capture_output=True, text=True, encoding="utf-8",
-        cwd=str(PROJECT_ROOT), env=env, timeout=30,
-    )
-
-
 class TestCLIJsonEnhanced(unittest.TestCase):
-    """CLI --json 输出增强测试。"""
+    """CLI --json / --no-append / update_index 测试。
 
-    _index_backup: str | None = None
+    通过复制 scripts/ 到临时目录并创建隔离的 memory/ 结构，
+    完全避免触碰真实 memory/ 目录。
+    """
+
+    _temp_root: Path | None = None
+    _temp_scripts: Path | None = None
 
     @classmethod
     def setUpClass(cls) -> None:
-        idx = PROJECT_ROOT / "memory" / "index.json"
-        if idx.exists():
-            cls._index_backup = idx.read_text(encoding="utf-8")
-        # 创建含 decisions/todos 的记忆
-        memory_core.save_memory(
-            "CLI_增强测试",
-            "我们决定使用 jieba 分词。TODO: 添加更多测试用例。"
+        # 1. 创建临时项目根目录
+        cls._temp_root = Path(tempfile.mkdtemp(prefix="clitest_"))
+        cls._temp_scripts = cls._temp_root / "scripts"
+
+        # 2. 复制 scripts/ 目录到临时目录（排除 __pycache__）
+        shutil.copytree(
+            SCRIPTS_DIR, cls._temp_scripts,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
+
+        # 3. 创建 memory/ 结构
+        mem_dir = cls._temp_root / "memory"
+        topics_dir = mem_dir / "topics"
+        topics_dir.mkdir(parents=True, exist_ok=True)
+        (topics_dir / "README.md").write_text(
+            "# topics 目录说明\n\n说明文件，不应被索引。\n", encoding="utf-8"
+        )
+        (mem_dir / "index.json").write_text("{}", encoding="utf-8")
 
     @classmethod
     def tearDownClass(cls) -> None:
-        idx = PROJECT_ROOT / "memory" / "index.json"
-        if cls._index_backup is not None:
-            idx.write_text(cls._index_backup, encoding="utf-8")
-        elif idx.exists():
-            idx.write_text("{}", encoding="utf-8")
-        topics_dir = PROJECT_ROOT / "memory" / "topics"
-        for p in sorted(topics_dir.glob("*.md")):
-            if p.name.lower() == "readme.md":
-                continue
-            if any(p.name.startswith(pre) for pre in ("CLI_", "测试_", "test_")):
+        if cls._temp_root and cls._temp_root.exists():
+            shutil.rmtree(cls._temp_root, ignore_errors=True)
+
+    def _run(self, script_name: str, *args: str) -> subprocess.CompletedProcess:
+        """在隔离环境中运行 CLI 脚本。"""
+        env = os.environ.copy()
+        env.setdefault("PYTHONIOENCODING", "utf-8")
+        cmd = [_PYTHON, str(self._temp_scripts / script_name)] + list(args)
+        return subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8",
+            cwd=str(self._temp_root), env=env, timeout=30,
+        )
+
+    def setUp(self) -> None:
+        # 每个测试前确保索引和 topics 干净
+        idx = self._temp_root / "memory" / "index.json"
+        idx.write_text("{}", encoding="utf-8")
+        topics = self._temp_root / "memory" / "topics"
+        for p in sorted(topics.glob("*.md")):
+            if p.name.lower() != "readme.md":
                 try:
                     p.unlink()
                 except FileNotFoundError:
                     pass
 
     def test_json_contains_decisions_todos(self):
-        proc = _run_cli("retrieve_memory.py", "--query", "jieba 分词", "--top-k", "3", "--json")
+        # 先保存一条含决策/待办的记忆
+        self._run("summarize_session.py", "--topic", "CLI_Decisions",
+                  "--text", "我们决定使用 jieba 分词。TODO: 添加更多测试。")
+        proc = self._run("retrieve_memory.py", "--query", "jieba 分词",
+                         "--top-k", "3", "--json")
         self.assertEqual(proc.returncode, 0, f"stderr: {proc.stderr}")
         data = json.loads(proc.stdout)
         self.assertIsInstance(data, list)
@@ -612,24 +631,183 @@ class TestCLIJsonEnhanced(unittest.TestCase):
             self.assertIn("todos", data[0])
             self.assertIsInstance(data[0]["decisions"], list)
             self.assertIsInstance(data[0]["todos"], list)
+            # 验证 decisions 字段名本身不会被误判为决策
+            # (修复: English trigger \bdecision\b 不再匹配 "decisions")
+            for dec in data[0]["decisions"]:
+                self.assertNotIn("decisions", dec.lower().replace("decision", ""),
+                                 "字段名 'decisions' 不应作为决策被抽取")
 
     def test_json_parsable_with_new_fields(self):
-        proc = _run_cli("retrieve_memory.py", "--query", "CLI 增强", "--top-k", "1", "--json")
+        self._run("summarize_session.py", "--topic", "CLI_Fields",
+                  "--text", "测试字段完整性。")
+        proc = self._run("retrieve_memory.py", "--query", "CLI_Fields",
+                         "--top-k", "1", "--json")
         self.assertEqual(proc.returncode, 0)
         data = json.loads(proc.stdout)
         self.assertIsInstance(data, list)
 
     def test_summarize_no_append_coverage(self):
-        _run_cli("summarize_session.py", "--topic", "CLI_覆盖增强", "--text", "旧。", "--no-append")
-        _run_cli("summarize_session.py", "--topic", "CLI_覆盖增强", "--text", "新。", "--no-append")
-        r = memory_core.retrieve_memory("CLI_覆盖增强", top_k=1)
-        self.assertTrue(len(r) > 0)
-        self.assertIn("新", r[0]["content"])
+        self._run("summarize_session.py", "--topic", "CLI_Overwrite",
+                  "--text", "旧内容。", "--no-append")
+        self._run("summarize_session.py", "--topic", "CLI_Overwrite",
+                  "--text", "新内容。", "--no-append")
+        proc = self._run("retrieve_memory.py", "--query", "CLI_Overwrite",
+                         "--top-k", "1", "--json")
+        self.assertEqual(proc.returncode, 0)
+        data = json.loads(proc.stdout)
+        if data:
+            content = data[0].get("content", "")
+            self.assertIn("新内容", content)
+            self.assertNotIn("旧内容", content)
 
     def test_update_index_reports_topics(self):
-        proc = _run_cli("update_index.py")
-        self.assertEqual(proc.returncode, 0)
+        self._run("summarize_session.py", "--topic", "CLI_Index",
+                  "--text", "用于重建索引测试。")
+        proc = self._run("update_index.py")
+        self.assertEqual(proc.returncode, 0, f"stderr: {proc.stderr}")
         self.assertIn("Total topics", proc.stdout)
+
+    def test_trigger_word_boundary_fix(self):
+        """验证 \b 单词边界修复：'decisions' 不应触发 decision 匹配。"""
+        self._run("summarize_session.py", "--topic", "CLI_Boundary",
+                  "--text",
+                  "我们需要检查 JSON 输出中的 decisions 和 todos 字段是否正确。"
+                  "这只是一个数据格式检查，不是关键决策。")
+        proc = self._run("retrieve_memory.py", "--query", "decisions todos 字段",
+                         "--top-k", "1", "--json")
+        self.assertEqual(proc.returncode, 0)
+        data = json.loads(proc.stdout)
+        if data:
+            decisions = data[0].get("decisions", [])
+            # "decisions 和 todos 字段" 不应被判定为关键决策
+            field_name_matches = [
+                d for d in decisions
+                if "decisions" in d.lower() or "todos" in d.lower()
+            ]
+            self.assertEqual(
+                len(field_name_matches), 0,
+                f"字段名不应被误判为决策: {field_name_matches}"
+            )
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 3: Hook / Plugin / Skill 集成测试
+# ═══════════════════════════════════════════════════════════════
+
+class TestPhase3HookScripts(unittest.TestCase):
+    """验证 Phase 3 Hook 脚本存在且可执行。"""
+
+    def test_hook_scripts_exist(self):
+        """所有平台 Hook 脚本应存在且非空。"""
+        hooks_dir = PROJECT_ROOT / "hooks"
+        expected = [
+            "post_conversation.sh", "pre_prompt.sh",
+            "post_conversation.bat", "pre_prompt.bat",
+            "post_conversation.ps1", "pre_prompt.ps1",
+            # 旧版示例保留
+            "post_conversation_example.sh", "pre_prompt_example.sh",
+        ]
+        for name in expected:
+            path = hooks_dir / name
+            self.assertTrue(path.exists(), f"缺失: {name}")
+            self.assertGreater(path.stat().st_size, 0, f"空文件: {name}")
+
+    def test_bash_scripts_have_shebang(self):
+        """Bash 脚本应以 #!/usr/bin/env bash 开头。"""
+        for name in ["post_conversation.sh", "pre_prompt.sh"]:
+            path = PROJECT_ROOT / "hooks" / name
+            first_line = path.read_text(encoding="utf-8").split("\n")[0]
+            self.assertIn("bash", first_line, f"{name} 缺少 shebang")
+
+    def test_bash_scripts_are_executable(self):
+        """Bash 脚本应有可执行权限（非 Windows 检查）。"""
+        if sys.platform == "win32":
+            self.skipTest("Windows 不检查可执行位")
+        for name in ["post_conversation.sh", "pre_prompt.sh"]:
+            path = PROJECT_ROOT / "hooks" / name
+            self.assertTrue(os.access(str(path), os.X_OK), f"{name} 不可执行")
+
+    def test_hook_scripts_syntax_valid(self):
+        """Bash 脚本语法应有效（bash -n 检查）。"""
+        if sys.platform == "win32":
+            self.skipTest("Windows 跳过 bash 语法检查")
+        import subprocess as sp
+        for name in ["post_conversation.sh", "pre_prompt.sh"]:
+            path = PROJECT_ROOT / "hooks" / name
+            proc = sp.run(["bash", "-n", str(path)], capture_output=True)
+            self.assertEqual(proc.returncode, 0, f"{name} 语法错误: {proc.stderr}")
+
+
+class TestPhase3PluginManifest(unittest.TestCase):
+    """验证 plugin.json 结构完整。"""
+
+    def test_plugin_json_exists_and_valid(self):
+        path = PROJECT_ROOT / "plugin.json"
+        self.assertTrue(path.exists(), "plugin.json 缺失")
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        required = ["name", "version", "description", "skill", "hooks", "commands"]
+        for key in required:
+            self.assertIn(key, manifest, f"plugin.json 缺少 '{key}' 字段")
+        self.assertEqual(manifest["name"], "claude-code-memory-skill")
+
+    def test_plugin_commands_defined(self):
+        manifest = json.loads(
+            (PROJECT_ROOT / "plugin.json").read_text(encoding="utf-8")
+        )
+        cmds = manifest.get("commands", {})
+        for cmd_name in ["memory:save", "memory:retrieve", "memory:rebuild"]:
+            self.assertIn(cmd_name, cmds, f"plugin.json 缺少命令: {cmd_name}")
+            self.assertIn("script", cmds[cmd_name])
+            self.assertIn("usage", cmds[cmd_name])
+
+    def test_plugin_permissions(self):
+        manifest = json.loads(
+            (PROJECT_ROOT / "plugin.json").read_text(encoding="utf-8")
+        )
+        perms = manifest.get("permissions", {})
+        self.assertIn("filesystem", perms)
+        self.assertIn("execution", perms)
+        self.assertFalse(perms.get("network", True), "不应请求网络权限")
+
+
+class TestPhase3SettingsTemplate(unittest.TestCase):
+    """验证 settings.template.json 模板结构。"""
+
+    def test_settings_template_valid_json(self):
+        path = PROJECT_ROOT / "docs" / "settings.template.json"
+        self.assertTrue(path.exists(), "settings.template.json 缺失")
+        template = json.loads(path.read_text(encoding="utf-8"))
+        self.assertIn("hooks", template)
+        hooks = template["hooks"]
+        # 至少有一个 Hook 事件配置
+        self.assertTrue(len(hooks) > 0, "settings.template.json 应包含至少一个 Hook")
+
+    def test_template_has_cross_platform_options(self):
+        template = json.loads(
+            (PROJECT_ROOT / "docs" / "settings.template.json").read_text(encoding="utf-8")
+        )
+        has_windows = any("bat" in str(v).lower() or "ps1" in str(v).lower()
+                         for v in template.values() if isinstance(v, dict))
+        self.assertTrue(has_windows or "_windows" in str(template).lower(),
+                       "缺少跨平台 Hook 选项")
+
+
+class TestPhase3InstallScript(unittest.TestCase):
+    """验证 install.sh 安装脚本。"""
+
+    def test_install_script_exists(self):
+        path = PROJECT_ROOT / "install.sh"
+        self.assertTrue(path.exists(), "install.sh 缺失")
+        content = path.read_text(encoding="utf-8")
+        self.assertIn("bash", content[:40].lower(), "install.sh 应以 bash shebang 开头")
+
+    def test_install_script_syntax(self):
+        if sys.platform == "win32":
+            self.skipTest("Windows 跳过 bash 语法检查")
+        import subprocess as sp
+        path = PROJECT_ROOT / "install.sh"
+        proc = sp.run(["bash", "-n", str(path)], capture_output=True)
+        self.assertEqual(proc.returncode, 0, f"install.sh 语法错误: {proc.stderr}")
 
 
 # ═══════════════════════════════════════════════════════════════

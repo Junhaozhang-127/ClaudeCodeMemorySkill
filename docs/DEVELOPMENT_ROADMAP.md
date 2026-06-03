@@ -56,18 +56,18 @@
 
 ---
 
-## 第三阶段：Claude Code 生态接入
+## 第三阶段：Claude Code 生态接入（已完成 ✅）
 
 **目标**：让 Memory Skill 成为 Claude Code 原生体验的一部分。
 
-| 任务 | 优先级 | 说明 |
-|------|--------|------|
-| 正式 Hook 配置 | 高 | 根据 Claude Code 实际 Hook 规范，生成可直接使用的 `settings.json` 配置 |
-| Skill 注册 | 高 | 将项目注册为 Claude Code 可识别的 Skill，支持 `/memory` slash command |
-| 交互式检索命令 | 中 | 实现 `/memory-search` 或 `/memory-list` 等对话内命令 |
-| Plugin 打包 | 中 | 按 Claude Code Plugin 规范打包，支持一键安装和配置 |
-| 记忆浏览命令 | 低 | `/memory-recent` 查看最近记忆，`/memory-topics` 列出所有主题 |
-| 自动 Hook 安装脚本 | 低 | 一键配置脚本，自动添加 Hook 到 settings.json |
+| 任务 | 优先级 | 状态 | 说明 |
+|------|--------|------|------|
+| 正式 Hook 配置 | 高 | ✅ 已完成 | production bash/bat/ps1 脚本 + `settings.template.json` |
+| Skill 注册 | 高 | ✅ 已完成 | `SKILL.md` 含 slash command 定义 |
+| Slash Command | 中 | ✅ 已完成 | `/memory save`、`/memory retrieve`、`/memory rebuild` |
+| Plugin 打包 | 中 | ✅ 已完成 | `plugin.json` 清单 + `install.sh` 安装脚本 |
+| 跨平台 Hook 脚本 | 中 | ✅ 已完成 | bash / Windows CMD / PowerShell 三套脚本 |
+| 自动 Hook 安装脚本 | 低 | ✅ 已完成 | `install.sh` 一键安装 + 测试验证 |
 
 ---
 
