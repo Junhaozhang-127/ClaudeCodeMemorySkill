@@ -20,31 +20,15 @@
 
 ## Slash Commands
 
-本 Skill 提供以下对话内命令（以 `/` 开头）：
+本 Skill 在 `plugin.json` Manifest 中声明了以下 Slash Command（CLI 映射模式）：
 
-### `/memory save <主题>`
+| 命令 | CLI 映射 | 用途 |
+|------|----------|------|
+| `/memory save <主题>` | `scripts/summarize_session.py` | 保存当前对话为结构化 Markdown 记忆 |
+| `/memory retrieve <查询>` | `scripts/retrieve_memory.py` | 检索相关历史记忆，注入上下文 |
+| `/memory rebuild` | `scripts/update_index.py` | 从 Markdown 文件重建 index.json 索引 |
 
-保存当前对话为结构化 Markdown 记忆。
-
-```bash
-python scripts/summarize_session.py --topic "<主题>" --text "<对话内容>"
-```
-
-### `/memory retrieve <查询>`
-
-检索与查询相关的历史记忆，注入当前上下文。
-
-```bash
-python scripts/retrieve_memory.py --query "<查询>" --top-k 5
-```
-
-### `/memory rebuild`
-
-从已有 Markdown 文件重建 `memory/index.json` 索引。
-
-```bash
-python scripts/update_index.py
-```
+**实现说明**：当前 Slash Command 通过 SKILL.md / plugin.json 声明映射到现有 CLI 脚本。Claude Code 解析到命令后，调用对应的 Python CLI 入口。无需额外 `commands/` 或 `slash_commands/` 目录，所有逻辑已在 `scripts/` 中实现。
 
 ### 使用示例
 

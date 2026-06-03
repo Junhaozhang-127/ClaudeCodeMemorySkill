@@ -27,9 +27,10 @@ def main() -> None:
     parser.add_argument("--query", required=True, help="用户当前输入或检索问题")
     parser.add_argument("--top-k", type=int, default=5, help="最多返回几条相关记忆")
     parser.add_argument("--json", action="store_true", help="以 JSON 输出")
+    parser.add_argument("--workspace", default="", help="workspace 名称（空则使用默认路径）")
     args = parser.parse_args()
 
-    results = retrieve_memory(args.query, top_k=args.top_k)
+    results = retrieve_memory(args.query, top_k=args.top_k, workspace=args.workspace)
 
     if args.json:
         import json

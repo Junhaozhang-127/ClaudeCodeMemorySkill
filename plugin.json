@@ -61,20 +61,24 @@
   },
 
   "commands": {
+    "_comment": "Slash commands are CLI-mapped via SKILL.md declaration. No separate commands/ directory needed.",
     "memory:save": {
       "script": "scripts/summarize_session.py",
       "description": "保存当前对话记忆",
-      "usage": "/memory save --topic <主题>"
+      "usage": "/memory save <主题>",
+      "implementation": "CLI-mapped"
     },
     "memory:retrieve": {
       "script": "scripts/retrieve_memory.py",
       "description": "检索相关历史记忆",
-      "usage": "/memory retrieve --query <查询>"
+      "usage": "/memory retrieve <查询>",
+      "implementation": "CLI-mapped"
     },
     "memory:rebuild": {
       "script": "scripts/update_index.py",
       "description": "重建记忆索引",
-      "usage": "/memory rebuild"
+      "usage": "/memory rebuild",
+      "implementation": "CLI-mapped"
     }
   },
 

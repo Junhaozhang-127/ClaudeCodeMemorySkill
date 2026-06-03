@@ -22,6 +22,10 @@ Claude Code 默认每个会话相互独立。当开发者切换会话或重新�
 - **Hook 自动化**：会话结束自动保存、用户输入前自动检索（支持 bash/bat/ps1）
 - **Slash Command**：`/memory save`、`/memory retrieve`、`/memory rebuild` 对话内命令
 - **Plugin 打包**：`plugin.json` 清单，一键安装脚本 `install.sh`
+- **Workspace 隔离**：按项目/workpace 隔离记忆目录，不同项目互不干扰
+- **混合检索**：多信号加权 + score_breakdown 可解释评分
+- **记忆维护**：去重、合并、压缩、归档（dry-run 安全模式）
+- **安全增强**：路径防遍历、Markdown fence 转义、索引备份 + 文件锁
 
 ## 项目结构
 

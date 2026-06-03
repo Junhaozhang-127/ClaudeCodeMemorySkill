@@ -1,44 +1,85 @@
-# ============================================================================
-# Claude Code Memory Skill — 会话后写入记忆 Hook (PowerShell)
-#
-# 用法：
-#   .\hooks\post_conversation.ps1 -Topic "主题" -File "C:\path\to\conversation.txt"
-# ============================================================================
+<#
+.SYNOPSIS
+    Claude Code Memory Skill — Save conversation memory (PowerShell)
+.DESCRIPTION
+    Called by Claude Code Hook (Stop event) to save the current conversation
+    as a structured Markdown memory file and update index.json.
+.PARAMETER Topic
+    Conversation topic/title. Falls back to CLAUDE_CONVERSATION_TITLE env var.
+.PARAMETER File
+    Path to a text file containing conversation content.
+.PARAMETER Text
+    Conversation text passed directly on the command line.
+.EXAMPLE
+    .\hooks\post_conversation.ps1 -Topic "Architecture" -Text "We decided to..."
+    .\hooks\post_conversation.ps1 -Topic "Bug Fix" -File "C:\temp\conv.txt"
+#>
+
 param(
     [string]$Topic = "",
     [string]$File = "",
     [string]$Text = ""
 )
 
+# ---- encoding setup (must come first) ----
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+$PSDefaultParameterValues['*:Encoding'] = 'utf8'
+
+# ---- resolve project root ----
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = Split-Path -Parent $ScriptDir
 
-if (-not $Topic -and $env:CLAUDE_CONVERSATION_TITLE) {
+# ---- determine topic ----
+if ((-not $Topic) -and $env:CLAUDE_CONVERSATION_TITLE) {
     $Topic = $env:CLAUDE_CONVERSATION_TITLE
 }
 if (-not $Topic) {
-    $Topic = "未命名对话 $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+    $Topic = "Untitled-" + (Get-Date -Format 'yyyyMMdd-HHmm')
 }
 
-$PythonBin = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { "python" }
-
-Set-Location $ProjectDir
-
-if ($Text) {
-    & $PythonBin scripts/summarize_session.py --topic $Topic --text $Text
+# ---- detect Python ----
+$PythonBin = $null
+foreach ($candidate in @("python3", "python")) {
+    $found = Get-Command $candidate -ErrorAction SilentlyContinue
+    if ($found) { $PythonBin = $candidate; break }
 }
-elseif ($env:CLAUDE_CONVERSATION_CONTENT) {
-    $TempFile = Join-Path $env:TEMP "claude_memory_hook.txt"
-    $env:CLAUDE_CONVERSATION_CONTENT | Out-File -FilePath $TempFile -Encoding UTF8
-    & $PythonBin scripts/summarize_session.py --topic $Topic --file $TempFile
-    Remove-Item $TempFile -ErrorAction SilentlyContinue
-}
-elseif ($File -and (Test-Path $File)) {
-    & $PythonBin scripts/summarize_session.py --topic $Topic --file $File
-}
-else {
-    Write-Error "[Memory Hook] 无对话内容可保存"
+if (-not $PythonBin) {
+    Write-Error "[Memory Hook] Python not found in PATH"
     exit 1
 }
 
-Write-Host "[Memory Hook] 记忆保存完成：$Topic"
+# ---- navigate to project root ----
+Push-Location $ProjectDir
+try {
+    if ($Text) {
+        # pass text via stdin / temp file to avoid shell quoting issues with CJK
+        $TempFile = [System.IO.Path]::GetTempFileName() + ".txt"
+        try {
+            [System.IO.File]::WriteAllText($TempFile, $Text, [System.Text.UTF8Encoding]::new($false))
+            & $PythonBin scripts/summarize_session.py --topic $Topic --file $TempFile
+        } finally {
+            if (Test-Path $TempFile) { Remove-Item $TempFile -Force }
+        }
+    }
+    elseif ($env:CLAUDE_CONVERSATION_CONTENT) {
+        $TempFile = [System.IO.Path]::GetTempFileName() + ".txt"
+        try {
+            [System.IO.File]::WriteAllText($TempFile, $env:CLAUDE_CONVERSATION_CONTENT, [System.Text.UTF8Encoding]::new($false))
+            & $PythonBin scripts/summarize_session.py --topic $Topic --file $TempFile
+        } finally {
+            if (Test-Path $TempFile) { Remove-Item $TempFile -Force }
+        }
+    }
+    elseif ($File -and (Test-Path $File)) {
+        & $PythonBin scripts/summarize_session.py --topic $Topic --file $File
+    }
+    else {
+        Write-Error "[Memory Hook] No conversation content available"
+        exit 1
+    }
+} finally {
+    Pop-Location
+}
+
+Write-Host "[Memory Hook] Memory saved: $Topic"

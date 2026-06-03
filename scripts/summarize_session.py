@@ -28,6 +28,7 @@ def main() -> None:
     parser.add_argument("--text", help="对话内容")
     parser.add_argument("--file", help="从文本文件读取对话内容")
     parser.add_argument("--no-append", action="store_true", help="同主题同日期文件存在时不追加，而是覆盖")
+    parser.add_argument("--workspace", default="", help="workspace 名称（空则使用默认路径）")
     args = parser.parse_args()
 
     if args.file:
@@ -37,7 +38,7 @@ def main() -> None:
     else:
         raise SystemExit("必须提供 --text 或 --file")
 
-    path = save_memory(args.topic, conversation_text, append=not args.no_append)
+    path = save_memory(args.topic, conversation_text, append=not args.no_append, workspace=args.workspace)
     print(f"Memory saved: {path}")
 
 

@@ -1,35 +1,29 @@
 @echo off
 REM ============================================================================
-REM Claude Code Memory Skill — 会话后写入记忆 Hook (Windows Batch)
+REM Claude Code Memory Skill — Save conversation memory (Windows CMD)
 REM
-REM 用法：
-REM   hooks\post_conversation.bat "主题" "C:\path\to\conversation.txt"
+REM Usage:
+REM   hooks\post_conversation.bat "Topic" "C:\path\to\conversation.txt"
+REM
+REM Environment variables (set by Claude Code):
+REM   CLAUDE_CONVERSATION_TITLE   — fallback topic
 REM ============================================================================
-setlocal enabledelayedexpansion
+setlocal disabledelayedexpansion
 
-set TOPIC=%~1
-set CONVERSATION_FILE=%~2
+set "SCRIPT_DIR=%~dp0"
+cd /d "%SCRIPT_DIR%.." 2>nul || exit /b 1
 
-if "%TOPIC%"=="" set TOPIC=未命名对话 %date% %time%
+set "TOPIC=%~1"
+if "%TOPIC%"=="" if defined CLAUDE_CONVERSATION_TITLE set "TOPIC=%CLAUDE_CONVERSATION_TITLE%"
+if "%TOPIC%"=="" set "TOPIC=Untitled"
 
-if not "%CLAUDE_CONVERSATION_TITLE%"=="" set TOPIC=%CLAUDE_CONVERSATION_TITLE%
+set "CONV_FILE=%~2"
 
-REM 检测 Python
-set PYTHON_BIN=python
-where python3 >nul 2>&1 && set PYTHON_BIN=python3
-
-cd /d "%~dp0.."
-
-if not "%CONVERSATION_FILE%"=="" (
-    %PYTHON_BIN% scripts\summarize_session.py --topic "%TOPIC%" --file "%CONVERSATION_FILE%"
-) else if not "%CLAUDE_CONVERSATION_CONTENT%"=="" (
-    echo %CLAUDE_CONVERSATION_CONTENT% > "%TEMP%\claude_memory_hook.txt"
-    %PYTHON_BIN% scripts\summarize_session.py --topic "%TOPIC%" --file "%TEMP%\claude_memory_hook.txt"
-    del "%TEMP%\claude_memory_hook.txt" 2>nul
-) else (
-    echo [Memory Hook] 无对话内容可保存
-    exit /b 1
+if not "%CONV_FILE%"=="" if exist "%CONV_FILE%" (
+    python scripts\summarize_session.py --topic "%TOPIC%" --file "%CONV_FILE%"
+    exit /b %errorlevel%
 )
 
-echo [Memory Hook] 记忆保存完成：%TOPIC%
-endlocal
+echo [Memory Hook] Usage: post_conversation.bat "Topic" "C:\path\to\file.txt"
+echo [Memory Hook] Or set CLAUDE_CONVERSATION_TITLE and provide a file path.
+exit /b 1

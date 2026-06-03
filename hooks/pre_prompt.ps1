@@ -1,28 +1,54 @@
-# ============================================================================
-# Claude Code Memory Skill — 用户输入前检索记忆 Hook (PowerShell)
-#
-# 用法：
-#   .\hooks\pre_prompt.ps1 -Query "用户当前问题"
-# ============================================================================
+<#
+.SYNOPSIS
+    Claude Code Memory Skill — Retrieve memory context (PowerShell)
+.DESCRIPTION
+    Called by Claude Code Hook (PrePrompt event) to search for relevant
+    historical memories and output them as injectable context.
+.PARAMETER Query
+    User's current input text. Falls back to CLAUDE_USER_INPUT env var.
+.EXAMPLE
+    .\hooks\pre_prompt.ps1 -Query "How to save session memory?"
+#>
+
 param(
     [string]$Query = ""
 )
 
+# ---- encoding setup (must come first) ----
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+$PSDefaultParameterValues['*:Encoding'] = 'utf8'
+
+# ---- resolve project root ----
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = Split-Path -Parent $ScriptDir
 
-if (-not $Query -and $env:CLAUDE_USER_INPUT) {
+# ---- determine query ----
+if ((-not $Query) -and $env:CLAUDE_USER_INPUT) {
     $Query = $env:CLAUDE_USER_INPUT
 }
 if (-not $Query) {
     exit 0
 }
 
-$PythonBin = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { "python" }
+# ---- detect Python ----
+$PythonBin = $null
+foreach ($candidate in @("python3", "python")) {
+    $found = Get-Command $candidate -ErrorAction SilentlyContinue
+    if ($found) { $PythonBin = $candidate; break }
+}
+if (-not $PythonBin) {
+    Write-Error "[Memory Hook] Python not found in PATH"
+    exit 1
+}
 
-Set-Location $ProjectDir
-
-& $PythonBin scripts/retrieve_memory.py --query $Query --top-k 5
+# ---- run retrieval ----
+Push-Location $ProjectDir
+try {
+    & $PythonBin scripts/retrieve_memory.py --query $Query --top-k 5
+} finally {
+    Pop-Location
+}
 
 Write-Host ""
-Write-Host "[Memory Hook] 检索完成。以上上下文将注入 Claude Code。"
+Write-Host "[Memory Hook] Retrieval complete. Context above will be injected."

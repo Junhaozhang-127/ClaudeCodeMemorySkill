@@ -1,13 +1,15 @@
 """
-memory_core.py
+memory_core.py — Claude Code Memory Skill 核心逻辑
 
-Claude Code Memory Skill 的核心逻辑：
-- 保存 Markdown 记忆（支持可插拔摘要器）
-- 更新 index.json（含 decisions / todos 元数据）
-- 检索相关记忆（优化评分算法）
-- 重建索引（兼容新旧 Markdown 格式）
+Phase 4 增强：
+  - workspace 项目隔离
+  - 混合检索 + score_breakdown
+  - 索引备份 + 文件锁
+  - 路径安全校验
+  - Markdown fence 转义
+  - 日志集成
 
-当前版本仅使用 Python 标准库 + 可选 jieba。
+保持所有 Phase 1/2/3 接口向后兼容。
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from pathlib import Path
@@ -23,16 +26,50 @@ from typing import Iterable
 # ── 可选依赖 ─────────────────────────────────────────────────
 try:
     import jieba  # noqa: F401
-
     _JIEBA_AVAILABLE = True
 except ImportError:
     _JIEBA_AVAILABLE = False
+
+# ── Phase 4 模块（项目内导入）────────────────────────────────
+try:
+    from retrieval import HybridRetriever, KeywordRetriever
+    _RETRIEVAL_AVAILABLE = True
+except ImportError:
+    _RETRIEVAL_AVAILABLE = False
+
+try:
+    from logging_utils import log_save, log_retrieve, log_rebuild, log_warning, log_error
+    _LOGGING_AVAILABLE = True
+except ImportError:
+    _LOGGING_AVAILABLE = False
+    def _noop(*a, **kw): pass
+    log_save = log_retrieve = log_rebuild = log_warning = log_error = _noop
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MEMORY_DIR = PROJECT_ROOT / "memory"
 TOPICS_DIR = MEMORY_DIR / "topics"
 INDEX_FILE = MEMORY_DIR / "index.json"
+
+# 索引备份最大保留数
+_MAX_BACKUPS = 10
+# 文件锁超时（秒）
+_LOCK_TIMEOUT = 5.0
+
+
+# ═══════════════════════════════════════════════════════════════
+# Workspace 路径解析
+# ═══════════════════════════════════════════════════════════════
+
+def _resolve_paths(workspace: str = ""):
+    """根据 workspace_id 解析记忆目录路径。
+
+    workspace 为空 / "default" 时使用旧 memory/ 路径。
+    """
+    if not workspace or workspace == "default":
+        return MEMORY_DIR, TOPICS_DIR, INDEX_FILE
+    base = MEMORY_DIR / "workspaces" / workspace
+    return base, base / "topics", base / "index.json"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -41,8 +78,6 @@ INDEX_FILE = MEMORY_DIR / "index.json"
 
 @dataclass
 class MemoryRecord:
-    """单条记忆索引记录。"""
-
     topic: str
     file: str
     keywords: list[str]
@@ -63,9 +98,9 @@ _CN_STOP_WORDS: set[str] = {
     "通过", "可以", "需要", "什么", "怎么", "为什么", "如何",
     "已经", "还", "就", "都", "也", "把", "被", "让", "从",
     "到", "对", "上", "下", "中", "与", "或", "但", "而",
-    "因为", "所以", "如果", "然后", "之后", "之前", "之后",
+    "因为", "所以", "如果", "然后", "之后", "之前",
     "一些", "所有", "很多", "非常", "比较", "可能", "应该",
-    "不是", "没有", "还是", "只是", "就是", "还有", "这个",
+    "不是", "没有", "还是", "只是", "就是", "还有",
     "这样", "那样", "这些", "那些", "这里", "那里", "自己",
     "知道", "觉得", "认为", "希望", "想", "要", "会", "能",
 }
@@ -74,8 +109,7 @@ _EN_STOP_WORDS: set[str] = {
     "being", "have", "has", "had", "do", "does", "did", "will",
     "would", "could", "should", "may", "might", "can", "shall",
     "to", "of", "in", "for", "on", "with", "at", "by", "from",
-    "as", "into", "through", "during", "before", "after", "above",
-    "below", "between", "under", "and", "but", "or", "nor", "not",
+    "as", "into", "through", "during", "before", "after",
     "this", "that", "these", "those", "it", "its", "he", "she",
     "they", "them", "we", "us", "i", "you", "me", "my", "your",
 }
@@ -87,10 +121,6 @@ _STOP_WORDS = _CN_STOP_WORDS | _EN_STOP_WORDS
 # ═══════════════════════════════════════════════════════════════
 
 def is_memory_markdown(path: Path) -> bool:
-    """检查是否为真实记忆 Markdown 文件。
-
-    排除 README.md、.gitkeep 以及其他以 . 开头的隐藏文件。
-    """
     if not path.suffix == ".md":
         return False
     name = path.name
@@ -104,41 +134,113 @@ def is_memory_markdown(path: Path) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 目录与索引 I/O
+# 目录 + 索引 I/O（含备份 + 锁）
 # ═══════════════════════════════════════════════════════════════
 
-def ensure_memory_dirs() -> None:
-    """确保记忆目录存在。"""
-    TOPICS_DIR.mkdir(parents=True, exist_ok=True)
-    if not INDEX_FILE.exists():
-        INDEX_FILE.write_text("{}", encoding="utf-8")
+def ensure_memory_dirs(workspace: str = "") -> None:
+    _, topics_dir, index_file = _resolve_paths(workspace)
+    topics_dir.mkdir(parents=True, exist_ok=True)
+    if not index_file.exists():
+        index_file.write_text("{}", encoding="utf-8")
 
 
 def slugify_topic(topic: str) -> str:
-    """将主题转换为安全文件名。"""
     topic = topic.strip() or "untitled"
     topic = re.sub(r"[\\/:*?\"<>|]+", "_", topic)
     topic = re.sub(r"\s+", "_", topic)
     return topic[:80]
 
 
-def load_index() -> dict:
-    """读取 index.json。"""
-    ensure_memory_dirs()
+def load_index(workspace: str = "") -> dict:
+    _, _, index_file = _resolve_paths(workspace)
     try:
-        return json.loads(INDEX_FILE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+        return json.loads(index_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, FileNotFoundError):
+        # 尝试从备份恢复
+        recovered = _try_restore_from_backup(index_file)
+        if recovered is not None:
+            log_warning(f"index.json 已损坏，已从备份恢复: {index_file}")
+            return recovered
+        log_warning(f"index.json 损坏且无可用备份: {index_file}")
         return {}
 
 
-def save_index(index: dict) -> None:
-    """原子写入 index.json。"""
-    ensure_memory_dirs()
-    tmp_path = INDEX_FILE.with_name("index.json.tmp")
+def _try_restore_from_backup(index_file: Path) -> dict | None:
+    """尝试从最近备份恢复索引。"""
+    backup_dir = index_file.parent / "backups"
+    if not backup_dir.exists():
+        return None
+    backups = sorted(backup_dir.glob("index_*.json"), reverse=True)
+    for bk in backups:
+        try:
+            data = json.loads(bk.read_text(encoding="utf-8"))
+            if data:
+                return data
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _acquire_lock(lock_path: Path, timeout: float = _LOCK_TIMEOUT) -> bool:
+    """尝试获取文件锁。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            return True
+        except (OSError, FileExistsError):
+            time.sleep(0.05)
+    return False
+
+
+def _release_lock(lock_path: Path) -> None:
+    try:
+        lock_path.unlink()
+    except (FileNotFoundError, OSError):
+        pass
+
+
+def _backup_index(index_file: Path, max_backups: int = _MAX_BACKUPS) -> None:
+    """在覆盖前创建索引备份。"""
+    if not index_file.exists():
+        return
+    backup_dir = index_file.parent / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    bak = backup_dir / f"index_{ts}.json"
+    try:
+        bak.write_text(index_file.read_text(encoding="utf-8"), encoding="utf-8")
+    except Exception:
+        return  # 备份失败不影响主流程
+    # 清理旧备份
+    all_baks = sorted(backup_dir.glob("index_*.json"))
+    for old in all_baks[:-max_backups]:
+        try:
+            old.unlink()
+        except Exception:
+            pass
+
+
+def save_index(index: dict, workspace: str = "") -> None:
+    """原子写入 index.json（含备份 + 锁）。"""
+    _, _, index_file = _resolve_paths(workspace)
+    ensure_memory_dirs(workspace)
+
+    # 备份
+    _backup_index(index_file)
+
+    # 锁
+    lock_path = index_file.with_suffix(index_file.suffix + ".lock")
+    locked = _acquire_lock(lock_path)
+    if not locked:
+        log_warning(f"无法获取索引锁，跳过写入: {index_file}")
+
+    tmp_path = index_file.with_name("index.json.tmp")
     json_text = json.dumps(index, ensure_ascii=False, indent=2)
     try:
         tmp_path.write_text(json_text, encoding="utf-8")
-        os.replace(tmp_path, INDEX_FILE)
+        os.replace(tmp_path, index_file)
     except Exception:
         if tmp_path.exists():
             try:
@@ -146,102 +248,69 @@ def save_index(index: dict) -> None:
             except FileNotFoundError:
                 pass
         raise
+    finally:
+        if locked:
+            _release_lock(lock_path)
 
 
 # ═══════════════════════════════════════════════════════════════
-# 关键词抽取（jieba 优先，规则法回退）
+# 关键词抽取
 # ═══════════════════════════════════════════════════════════════
 
 def _extract_keywords_jieba(text: str, topic: str, max_keywords: int = 10) -> list[str]:
-    """使用 jieba 分词提取关键词。"""
     import jieba as _jieba
-
     candidates: list[str] = []
-
-    # 主题切分
     for part in re.split(r"[_\s,，。；;:：/\\\-]+", topic):
         part = part.strip()
         if part:
             candidates.append(part)
-
-    # 英文技术 token
     candidates.extend(re.findall(r"[A-Za-z][A-Za-z0-9_\-]{2,}", text))
-
-    # jieba 分词 → 过滤停用词和短词
-    seg_list = _jieba.cut(text)
-    for word in seg_list:
+    for word in _jieba.cut(text):
         word = word.strip()
-        if not word:
-            continue
-        if len(word) < 2:
+        if not word or len(word) < 2:
             continue
         if word.lower() in _STOP_WORDS:
             continue
-        # 纯数字/标点跳过
         if re.fullmatch(r"[\d\.\,\;\:\!\?\-]+", word):
             continue
         candidates.append(word)
-
-    # 去重保序
     seen: set[str] = set()
     result: list[str] = []
     for item in candidates:
         item = item.strip()
-        if not item or item in seen:
-            continue
-        if item.lower() in _STOP_WORDS:
+        if not item or item in seen or item.lower() in _STOP_WORDS:
             continue
         seen.add(item)
         result.append(item)
         if len(result) >= max_keywords:
             break
-
     return result
 
 
 def _extract_keywords_regex(text: str, topic: str, max_keywords: int = 10) -> list[str]:
-    """规则法提取关键词（jieba 不可用时的回退方案）。"""
     candidates: list[str] = []
-
-    # 主题切分
     for part in re.split(r"[_\s,，。；;:：/\\\-]+", topic):
         part = part.strip()
         if part:
             candidates.append(part)
-
-    # 英文技术 token
     candidates.extend(re.findall(r"[A-Za-z][A-Za-z0-9_\-]{2,}", text))
-
-    # 中文片段提取（2~8 字）
-    chinese_terms = re.findall(r"[一-鿿]{2,8}", text)
-    # 过滤停用词和过短词
-    for term in chinese_terms:
+    for term in re.findall(r"[一-鿿]{2,8}", text):
         if len(term) >= 2 and term not in _STOP_WORDS:
             candidates.append(term)
-
-    # 去重 + 停用词过滤
     seen: set[str] = set()
     result: list[str] = []
     for item in candidates:
         item = item.strip()
-        if not item or item in seen:
-            continue
-        if item.lower() in _STOP_WORDS:
+        if not item or item in seen or item.lower() in _STOP_WORDS:
             continue
         seen.add(item)
         result.append(item)
         if len(result) >= max_keywords:
             break
-
     return result
 
 
 def extract_keywords(text: str, topic: str = "", max_keywords: int = 10) -> list[str]:
-    """抽取关键词。
-
-    jieba 可用时优先使用 jieba 分词；不可用时回退到正则规则法。
-    签名和默认行为保持向后兼容。
-    """
     if _JIEBA_AVAILABLE:
         try:
             return _extract_keywords_jieba(text, topic, max_keywords)
@@ -255,7 +324,6 @@ def extract_keywords(text: str, topic: str = "", max_keywords: int = 10) -> list
 # ═══════════════════════════════════════════════════════════════
 
 def simple_summary(text: str, max_chars: int = 300) -> str:
-    """生成极简摘要（截断法，兼容旧调用）。"""
     normalized = re.sub(r"\s+", " ", text).strip()
     if len(normalized) <= max_chars:
         return normalized
@@ -263,10 +331,21 @@ def simple_summary(text: str, max_chars: int = 300) -> str:
 
 
 def _get_default_summarizer():
-    """懒加载默认摘要器（避免循环导入）。"""
     from summarizers import RuleBasedSummarizer
-
     return RuleBasedSummarizer(keyword_extractor=extract_keywords)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Markdown fence 转义
+# ═══════════════════════════════════════════════════════════════
+
+def _safe_code_fence(text: str) -> str:
+    """防止原文中的 ``` 破坏 Markdown 结构。"""
+    # 将原文中的连续反引号用更长 fence 包裹，或转义
+    if "```" in text:
+        # 使用 4 反引号 fence 替代 3 反引号
+        return text.replace("```", "`​``")  # zero-width space 防合并
+    return text
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -278,40 +357,29 @@ def save_memory(
     conversation_text: str,
     append: bool = True,
     summarizer=None,
+    workspace: str = "",
 ) -> Path:
-    """保存一条会话记忆到 Markdown，并更新索引。
-
-    Args:
-        topic: 对话主题。
-        conversation_text: 本轮对话内容。
-        append: 如果同名主题文件存在，是否追加写入。
-        summarizer: 可选摘要器（需实现 BaseSummarizer 接口）。
-                   为 None 时使用 RuleBasedSummarizer。
-
-    Returns:
-        写入的 Markdown 文件路径。
-    """
-    ensure_memory_dirs()
+    ensure_memory_dirs(workspace)
+    _, topics_dir, index_file = _resolve_paths(workspace)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     date_str = datetime.now().strftime("%Y-%m-%d")
     safe_topic = slugify_topic(topic)
     filename = f"{safe_topic}_{date_str}.md"
-    filepath = TOPICS_DIR / filename
+    filepath = topics_dir / filename
 
-    # ── 使用摘要器生成结构化结果 ──
     if summarizer is None:
         summarizer = _get_default_summarizer()
     result = summarizer.summarize(conversation_text, topic)
 
     summary = result.summary or simple_summary(conversation_text)
     keywords = result.keywords if result.keywords else extract_keywords(conversation_text, topic)
-
-    # ── 构建决策/待办段落 ──
     decisions_lines = _format_list_section(result.decisions, "无明确关键决策。")
     todos_lines = _format_list_section(result.todos, "无明确待办事项。")
-
     keywords_str = ", ".join(keywords) if keywords else "暂无"
+
+    # 转义原文中的 fence
+    safe_text = _safe_code_fence(conversation_text.strip())
 
     block = f"""# {topic}
 
@@ -335,9 +403,9 @@ def save_memory(
 
 ## 原始对话摘录
 
-```text
-{conversation_text.strip()}
-```
+````text
+{safe_text}
+````
 
 ---
 
@@ -349,8 +417,7 @@ def save_memory(
     else:
         filepath.write_text(block, encoding="utf-8")
 
-    # ── 更新索引 ──
-    index = load_index()
+    index = load_index(workspace)
     record = MemoryRecord(
         topic=topic,
         file=str(filepath.relative_to(PROJECT_ROOT)),
@@ -362,73 +429,36 @@ def save_memory(
         updated_at=now,
     )
     index[safe_topic] = asdict(record)
-    save_index(index)
+    save_index(index, workspace)
 
+    log_save(topic, str(filepath), workspace)
     return filepath
 
 
 def _format_list_section(items: list[str], fallback: str) -> str:
-    """格式化列表段落：有内容时每条一行 '- 内容'，否则输出 fallback。"""
     if not items:
         return fallback
     return "\n".join(f"- {item}" for item in items)
 
 
 # ═══════════════════════════════════════════════════════════════
-# 检索评分
+# 检索评分（Phase 2 算法，保留兼容）
 # ═══════════════════════════════════════════════════════════════
 
-def _tokenize_query(query: str) -> list[str]:
-    """将查询文本切分为有意义的 token 列表（过滤停用词和短词）。"""
-    tokens: list[str] = []
-
-    # 英文 token
-    tokens.extend(re.findall(r"[A-Za-z][A-Za-z0-9_\-]{1,}", query))
-
-    # 中文 token（2~6 字滑动窗口）
-    chinese_chars = re.findall(r"[一-鿿]+", query)
-    for chunk in chinese_chars:
-        # 2~4 字滑动（避免过长组合）
-        for wlen in (4, 3, 2):
-            for i in range(len(chunk) - wlen + 1):
-                tokens.append(chunk[i : i + wlen])
-
-    # 过滤停用词和短词
-    filtered: list[str] = []
-    for t in tokens:
-        t = t.strip()
-        if len(t) < 2:
-            continue
-        if t.lower() in _STOP_WORDS:
-            continue
-        filtered.append(t)
-
-    return filtered
-
-
 def score_record(query: str, record: dict) -> int:
-    """基于主题、关键词、摘要、决策、待办进行加权相关性评分。
-
-    返回整数分数，越高越相关。0 表示不相关。
-    """
     query_lower = query.lower()
     score = 0
-
     topic = str(record.get("topic", ""))
     topic_lower = topic.lower()
     summary = str(record.get("summary", ""))
-    summary_lower = summary.lower()
     keywords = [str(k).lower() for k in record.get("keywords", [])]
     decisions = [str(d).lower() for d in record.get("decisions", [])]
     todos = [str(t).lower() for t in record.get("todos", [])]
 
-    # ── 1. 主题完全命中（最高权重）──
     if topic_lower and topic_lower in query_lower:
         score += 15
 
-    # ── 2. 按 token 逐项匹配 ──
     tokens = _tokenize_query(query)
-    # 同时保留原始 query 的空白切分作为补充
     raw_tokens = re.split(r"\s+|,|，|。|；|;|:|：", query)
     all_tokens = list(set(t.lower() for t in tokens + raw_tokens if len(t.strip()) >= 2))
 
@@ -436,14 +466,12 @@ def score_record(query: str, record: dict) -> int:
         token = token.strip().lower()
         if not token or token in _STOP_WORDS:
             continue
-
         if token in topic_lower:
             score += 5
         if token in keywords:
             score += 4
-        if token in summary_lower:
+        if token in summary.lower():
             score += 2
-        # decisions / todos 命中加分
         for dec in decisions:
             if token in dec:
                 score += 3
@@ -453,7 +481,6 @@ def score_record(query: str, record: dict) -> int:
                 score += 3
                 break
 
-    # ── 3. 时间衰减加分（仅在已有内容命中时生效）──
     if score > 0:
         try:
             updated_str = str(record.get("updated_at", ""))
@@ -462,10 +489,49 @@ def score_record(query: str, record: dict) -> int:
                 days_ago = (datetime.now() - updated_dt).days
                 if days_ago <= 7:
                     score += 2
+                elif days_ago <= 30:
+                    score += 1
         except (ValueError, TypeError):
             pass
-
     return score
+
+
+def _tokenize_query(query: str) -> list[str]:
+    tokens: list[str] = []
+    tokens.extend(re.findall(r"[A-Za-z][A-Za-z0-9_\-]{1,}", query))
+    chinese_chars = re.findall(r"[一-鿿]+", query)
+    for chunk in chinese_chars:
+        for wlen in (4, 3, 2):
+            for i in range(len(chunk) - wlen + 1):
+                tokens.append(chunk[i:i + wlen])
+    return [t.strip() for t in tokens if len(t.strip()) >= 2 and t.strip().lower() not in _STOP_WORDS]
+
+
+# ═══════════════════════════════════════════════════════════════
+# 路径安全校验
+# ═══════════════════════════════════════════════════════════════
+
+def _validate_file_path(file_rel: str, workspace: str = ""):
+    """校验 index.json 中的 file 字段是否安全。
+
+    防止路径遍历攻击：file 必须 resolve 后位于当前 workspace topics/ 目录下。
+
+    Returns:
+        Path: 安全文件路径（文件存在）
+        None: 路径在 topics 内但文件不存在
+        False: 路径越界（应跳过该记录）
+    """
+    if not file_rel:
+        return None
+    _, topics_dir, _ = _resolve_paths(workspace)
+    resolved = (PROJECT_ROOT / file_rel).resolve()
+    topics_resolved = topics_dir.resolve()
+    try:
+        resolved.relative_to(topics_resolved)
+    except ValueError:
+        log_warning(f"路径越界，已跳过: {file_rel}")
+        return False
+    return resolved if resolved.exists() else None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -473,47 +539,68 @@ def score_record(query: str, record: dict) -> int:
 # ═══════════════════════════════════════════════════════════════
 
 def _safe_get_list(record: dict, key: str) -> list[str]:
-    """安全地从 record 中获取列表字段，兼容旧索引无此字段的情况。"""
     val = record.get(key, [])
-    if isinstance(val, list):
-        return val
-    return []
+    return val if isinstance(val, list) else []
 
 
-def retrieve_memory(query: str, top_k: int = 5) -> list[dict]:
-    """根据用户输入检索相关记忆。
+def retrieve_memory(
+    query: str,
+    top_k: int = 5,
+    workspace: str = "",
+    retriever=None,
+) -> list[dict]:
+    index = load_index(workspace)
+    records = list(index.values())
 
-    Returns:
-        包含 id、topic、score、file、content、summary、keywords、
-        decisions、todos 的结果列表。
-    """
-    index = load_index()
+    if retriever is None and _RETRIEVAL_AVAILABLE:
+        retriever = HybridRetriever(score_fn=score_record)
+
+    if retriever is not None:
+        results = retriever.retrieve(query, records, top_k)
+    else:
+        # 回退：使用原有 score_record 逻辑
+        results = _legacy_retrieve(query, records, top_k)
+
+    # 路径校验 + 读取内容 + 过滤越界记录
+    validated = []
+    for r in results:
+        file_rel = r.get("file", "")
+        safe_path = _validate_file_path(file_rel, workspace)
+        if safe_path is False:
+            # 路径越界，跳过该记录
+            continue
+        content = ""
+        if safe_path:
+            content = safe_path.read_text(encoding="utf-8")
+        r["content"] = content
+        if "decisions" not in r:
+            r["decisions"] = _safe_get_list(r, "decisions")
+        if "todos" not in r:
+            r["todos"] = _safe_get_list(r, "todos")
+        if "keywords" not in r:
+            r["keywords"] = _safe_get_list(r, "keywords")
+        if "score_breakdown" not in r:
+            r["score_breakdown"] = {"total": r.get("score", 0)}
+        if "matched_fields" not in r:
+            r["matched_fields"] = []
+        validated.append(r)
+
+    log_retrieve(query, top_k, len(validated), workspace)
+    return validated[:top_k]
+
+
+def _legacy_retrieve(query: str, records: list[dict], top_k: int) -> list[dict]:
+    """回退检索（无 retrieval.py 时使用）。"""
     scored = []
-
-    for key, record in index.items():
+    for record in records:
         score = score_record(query, record)
         if score <= 0:
             continue
-
-        filepath = PROJECT_ROOT / record.get("file", "")
-        content = ""
-        if filepath.exists():
-            content = filepath.read_text(encoding="utf-8")
-
-        scored.append(
-            {
-                "id": key,
-                "topic": record.get("topic", key),
-                "score": score,
-                "file": record.get("file", ""),
-                "summary": record.get("summary", ""),
-                "keywords": record.get("keywords", []),
-                "decisions": _safe_get_list(record, "decisions"),
-                "todos": _safe_get_list(record, "todos"),
-                "content": content,
-            }
-        )
-
+        item = dict(record)
+        item["score"] = score
+        item["score_breakdown"] = {"total": score}
+        item["matched_fields"] = []
+        scored.append(item)
     scored.sort(key=lambda x: x["score"], reverse=True)
     return scored[:top_k]
 
@@ -523,10 +610,10 @@ def retrieve_memory(query: str, top_k: int = 5) -> list[dict]:
 # ═══════════════════════════════════════════════════════════════
 
 def format_context(results: Iterable[dict], max_chars_per_item: int = 1200) -> str:
-    """把检索结果格式化为可注入 Claude Code 的上下文。
+    """格式化检索结果为可注入上下文。
 
     优先展示：摘要 → 关键决策 → 待办事项 → 内容片段。
-    保持每条记忆在 max_chars_per_item 字符以内。
+    max_chars_per_item 控制每条完整块的近似最大长度。
     """
     blocks = []
     for i, item in enumerate(results, start=1):
@@ -536,39 +623,54 @@ def format_context(results: Iterable[dict], max_chars_per_item: int = 1200) -> s
         summary = item.get("summary", "")
         decisions = _safe_get_list(item, "decisions")
         todos = _safe_get_list(item, "todos")
+        score_breakdown = item.get("score_breakdown", {})
+        matched = item.get("matched_fields", [])
 
-        # 组装优先级内容
         parts: list[str] = []
         remaining = max_chars_per_item
 
         # 摘要
         if summary:
-            parts.append(f"**摘要**：{summary}")
-            remaining -= len(summary) + 10
+            snip = summary if len(summary) <= 180 else summary[:177] + "..."
+            parts.append(f"**摘要**：{snip}")
+            remaining -= len(snip) + 10
 
         # 关键决策
         if decisions and remaining > 40:
             dec_text = "；".join(decisions[:3])
-            if len(dec_text) > remaining - 20:
-                dec_text = dec_text[: remaining - 20] + "…"
+            if len(dec_text) > 150:
+                dec_text = dec_text[:147] + "..."
             parts.append(f"**关键决策**：{dec_text}")
             remaining -= len(dec_text) + 15
 
         # 待办事项
         if todos and remaining > 40:
             todo_text = "；".join(todos[:3])
-            if len(todo_text) > remaining - 20:
-                todo_text = todo_text[: remaining - 20] + "…"
+            if len(todo_text) > 150:
+                todo_text = todo_text[:147] + "..."
             parts.append(f"**待办事项**：{todo_text}")
             remaining -= len(todo_text) + 15
 
-        # 内容补充（低优先级，截断）
+        # score breakdown（精简）
+        if score_breakdown and len(score_breakdown) > 1 and remaining > 30:
+            bd_str = ", ".join(f"{k}:{v}" for k, v in score_breakdown.items() if v > 0)
+            if len(bd_str) > 100:
+                bd_str = bd_str[:97] + "..."
+            parts.append(f"**评分**：{bd_str}")
+            remaining -= len(bd_str) + 12
+
+        # 匹配字段
+        if matched and remaining > 20:
+            parts.append(f"**命中**：{', '.join(matched[:4])}")
+            remaining -= 30
+
+        # 内容补充（低优先级，严格截断）
         if remaining > 60:
             content = item.get("content", "")
             content = re.sub(r"\s*\n\s*\n\s*", " ", content)
             content = re.sub(r"\s+", " ", content)
             if len(content) > remaining - 5:
-                content = content[: remaining - 5] + "…"
+                content = content[:remaining - 5] + "..."
             parts.append(f"**内容**：{content}")
 
         body = "\n".join(parts)
@@ -589,29 +691,22 @@ def format_context(results: Iterable[dict], max_chars_per_item: int = 1200) -> s
 
 
 # ═══════════════════════════════════════════════════════════════
-# 索引重建（兼容新旧 Markdown 格式）
+# 索引重建
 # ═══════════════════════════════════════════════════════════════
 
 def _parse_markdown_section(content: str, heading: str) -> str:
-    """解析 Markdown 中某个 ## heading 下的文本内容。"""
-    # 匹配 ## heading 直到下一个 ## 或文件末尾
     pattern = rf"## {re.escape(heading)}\s*\n(.*?)(?=\n## |\Z)"
     match = re.search(pattern, content, flags=re.S)
-    if not match:
-        return ""
-    return match.group(1).strip()
+    return match.group(1).strip() if match else ""
 
 
 def _parse_markdown_list(content: str, heading: str) -> list[str]:
-    """解析 Markdown 中某个 ## heading 下的列表项（- item）。"""
     text = _parse_markdown_section(content, heading)
     if not text:
         return []
-
     items: list[str] = []
     for line in text.split("\n"):
         line = line.strip()
-        # 匹配 "- item" 或 "* item" 或 "1. item"
         m = re.match(r"^[-*]\s+(.+)", line)
         if not m:
             m = re.match(r"^\d+[\.\)]\s+(.+)", line)
@@ -622,61 +717,48 @@ def _parse_markdown_list(content: str, heading: str) -> list[str]:
     return items
 
 
-def rebuild_index() -> dict:
-    """扫描 memory/topics 下的 Markdown 文件，重建基础索引。
-
-    兼容新旧两种 Markdown 格式：
-    - 新格式含 ## 关键决策 / ## 待办事项 段落
-    - 旧格式无这些段落，返回空列表
-    """
-    ensure_memory_dirs()
+def rebuild_index(workspace: str = "") -> dict:
+    _, topics_dir, _ = _resolve_paths(workspace)
+    ensure_memory_dirs(workspace)
     index: dict = {}
+    scan_count = 0
 
-    for path in TOPICS_DIR.glob("*.md"):
+    for path in topics_dir.glob("*.md"):
         if not is_memory_markdown(path):
             continue
+        scan_count += 1
         content = path.read_text(encoding="utf-8")
 
-        # 解析一级标题 → topic
         first_heading = re.search(r"^#\s+(.+)$", content, flags=re.MULTILINE)
         topic = first_heading.group(1).strip() if first_heading else path.stem
 
-        # 解析摘要
         summary_text = _parse_markdown_section(content, "摘要")
-        if not summary_text:
-            summary_text = simple_summary(content)
-        summary = simple_summary(summary_text)
+        summary = simple_summary(summary_text) if summary_text else simple_summary(content)
 
-        # 解析关键词
         kw_text = _parse_markdown_section(content, "关键词")
-        keywords: list[str] = []
+        keywords = []
         if kw_text and kw_text != "暂无":
             keywords = [k.strip() for k in re.split(r"[,，、\s]+", kw_text) if k.strip()]
 
-        # 解析关键决策
         decisions = _parse_markdown_list(content, "关键决策")
-
-        # 解析待办事项
         todos = _parse_markdown_list(content, "待办事项")
 
-        # 文件时间
         stat = path.stat()
         created = datetime.fromtimestamp(stat.st_ctime).strftime("%Y-%m-%d %H:%M:%S")
         updated = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
 
         key = slugify_topic(path.stem)
-        index[key] = asdict(
-            MemoryRecord(
-                topic=topic,
-                file=str(path.relative_to(PROJECT_ROOT)),
-                keywords=keywords,
-                summary=summary,
-                decisions=decisions,
-                todos=todos,
-                created_at=created,
-                updated_at=updated,
-            )
-        )
+        index[key] = asdict(MemoryRecord(
+            topic=topic,
+            file=str(path.relative_to(PROJECT_ROOT)),
+            keywords=keywords,
+            summary=summary,
+            decisions=decisions,
+            todos=todos,
+            created_at=created,
+            updated_at=updated,
+        ))
 
-    save_index(index)
+    save_index(index, workspace)
+    log_rebuild(scan_count, len(index), workspace)
     return index

@@ -5,15 +5,20 @@ update_index.py
 
 示例：
 python scripts/update_index.py
+python scripts/update_index.py --workspace my-project
 """
 
 from __future__ import annotations
 
+import argparse
 from memory_core import rebuild_index
 
 
 def main() -> None:
-    index = rebuild_index()
+    parser = argparse.ArgumentParser(description="Rebuild memory index.")
+    parser.add_argument("--workspace", default="", help="workspace 名称（空则使用默认路径）")
+    args = parser.parse_args()
+    index = rebuild_index(workspace=args.workspace)
     print(f"Index rebuilt. Total topics: {len(index)}")
 
 
