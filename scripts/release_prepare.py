@@ -56,12 +56,15 @@ def scan_cleanable() -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Release cleanup")
-    parser.add_argument("--dry-run", action="store_true", default=True)
+    parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--keep-logs", action="store_true")
     parser.add_argument("--keep-backups", action="store_true")
     parser.add_argument("--keep-samples", action="store_true")
     args = parser.parse_args()
+
+    # 默认 dry-run（无 --apply 且无 --dry-run 显式传入时也走 dry-run）
+    do_apply = args.apply
 
     plan = scan_cleanable()
 
@@ -71,8 +74,6 @@ def main() -> None:
         plan["dirs_to_remove"].remove("logs")
     if args.keep_samples:
         plan["test_md_files"] = []
-
-    do_apply = args.apply and not args.dry_run
 
     total = len(plan["dirs_to_remove"]) + len(plan["files_to_remove"]) + len(plan["test_md_files"])
 

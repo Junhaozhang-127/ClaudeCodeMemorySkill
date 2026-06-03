@@ -71,7 +71,7 @@
 
 ---
 
-## 第四阶段：高级能力（当前开发中 🔧）
+## 第四阶段：高级能力（已完成 ✅）
 
 **目标**：将 Memory Skill 升级为接近生产级的记忆系统。
 
@@ -112,9 +112,30 @@
 
 ---
 
+## 第五阶段：发布前增强（已完成 ✅）
+
+**目标**：版本化、安装工具、健康检查、验收测试，让项目达到可发布标准。
+
+| 任务 | 状态 | 说明 |
+|------|------|------|
+| 项目版本化 | ✅ | `scripts/version.py` v0.5.0, `plugin.json` 版本同步 |
+| 安装脚本 | ✅ | `install.py` (--check-only), `install.sh` |
+| 卸载脚本 | ✅ | `uninstall.py` (--dry-run 默认，--delete-memory 需 --yes) |
+| 升级/迁移脚本 | ✅ | `upgrade.py` (legacy → workspace 迁移) |
+| 健康检查 | ✅ | `health_check.py` (结构/Python/memory/安全/日志) |
+| 配置校验 | ✅ | `config.py` + `config.example.json` |
+| 发布清理 | ✅ | `release_prepare.py` (--dry-run 默认) |
+| 验收测试 | ✅ | `run_acceptance.py --quick` (7 项) |
+| 记忆统计 | ✅ | `memory_stats.py --json` |
+| CHANGELOG | ✅ | Phase 1–5 完整记录 |
+| 能力矩阵 | ✅ | `docs/CAPABILITY_MATRIX.md` (40+ 项) |
+| LICENSE | ✅ | MIT |
+
+---
+
 ## 技术原则
 
-贯穿四个阶段的工程原则：
+贯穿五个阶段的工程原则：
 
 1. **渐进增强**：每个阶段独立可用，不因为后续阶段而阻塞当前交付
 2. **向后兼容**：`index.json` 格式、Markdown 文件格式、CLI 接口尽量不破坏
