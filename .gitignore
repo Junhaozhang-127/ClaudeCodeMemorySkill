@@ -26,3 +26,6 @@ memory/topics/测试_*.md
 # IDE
 .idea/
 .vscode/
+
+# 用户本地配置（记忆路径等）
+config.json
