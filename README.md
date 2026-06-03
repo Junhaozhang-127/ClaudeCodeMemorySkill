@@ -72,6 +72,18 @@ ClaudeMeory/
 
 - Python 3.7+（核心仅使用标准库）
 
+### 首次设置
+
+```bash
+# 交互式设置记忆存储路径（首次使用推荐）
+python scripts/install.py --interactive
+
+# 或直接使用默认路径
+python scripts/install.py --path "./memory"
+```
+
+首次运行时，向导会提示你选择记忆存储路径。可以直接回车使用默认的 `./memory`，或输入自定义绝对路径（如 `D:\MyMemories`）。配置保存在 `config.json`，下次运行不再提示。
+
 ### 可选依赖
 
 ```bash
