@@ -10,12 +10,14 @@ Claude Code 默认每个会话相互独立。当开发者切换会话或重新�
 
 ## 核心能力
 
-- **会话保存**：将对话内容整理为结构化 Markdown 记忆文件（含摘要、关键词、关键决策、待办事项）
+- **结构化摘要**：基于规则从对话中抽取摘要、关键决策、待办事项（可插拔架构，支持未来接入 LLM）
+- **中文关键词增强**：优先使用 jieba 分词 + 停用词过滤；无 jieba 时自动回退到正则规则法
+- **会话保存**：将对话内容整理为结构化 Markdown 记忆文件
 - **主题归档**：按主题和日期归档到 `memory/topics/`
-- **索引维护**：使用 `memory/index.json` 维护主题索引
-- **记忆检索**：新会话时根据用户输入匹配相关记忆
-- **上下文注入**：输出可注入 Claude Code 的 Markdown 格式上下文片段
-- **索引重建**：从已有 Markdown 文件恢复 `index.json`
+- **索引维护**：使用 `memory/index.json` 维护主题索引（含 decisions、todos 字段）
+- **优化检索**：多字段加权评分（主题 > 关键词 > 决策/待办 > 摘要），含时间衰减
+- **上下文注入**：优先输出摘要、关键决策、待办事项，原始对话作为低优先级补充
+- **索引重建**：从 Markdown 文件恢复 `index.json`，兼容新旧 Markdown 格式
 - **零数据库依赖**：纯文件存储，Markdown + JSON，人工可读、Git 友好、易于迁移
 
 ## 项目结构
@@ -24,11 +26,12 @@ Claude Code 默认每个会话相互独立。当开发者切换会话或重新�
 ClaudeMeory/
 ├── README.md                         # 项目说明（本文件）
 ├── SKILL.md                          # Claude Code Skill 行为规则
-├── requirements.txt                  # Python 依赖声明（MVP 仅标准库）
+├── requirements.txt                  # Python 依赖声明（核心仅标准库，jieba 可选）
 ├── .gitignore                        # Git 忽略规则
 ├── scripts/
 │   ├── __init__.py                   # Package 标记
 │   ├── memory_core.py                # 核心逻辑（保存、检索、索引、格式化）
+│   ├── summarizers.py                # 可插拔摘要器模块
 │   ├── summarize_session.py          # 保存记忆 CLI 入口
 │   ├── retrieve_memory.py            # 检索记忆 CLI 入口
 │   └── update_index.py               # 重建索引 CLI 入口
@@ -40,18 +43,26 @@ ClaudeMeory/
 │   └── topics/                       # Markdown 记忆存储目录
 │       └── README.md                 # 目录说明（不会被索引）
 ├── tests/
-│   └── test_memory_skill.py          # 12 项核心流程测试
+│   └── test_memory_skill.py          # 49 项测试（核心 + CLI）
 └── docs/
     ├── PROJECT_STRUCTURE.md          # 项目结构说明文档
     ├── HOOK_SETUP.md                 # Hook 配置指南
-    └── DEVELOPMENT_ROADMAP.md        # 后续开发路线
+    ├── DEVELOPMENT_ROADMAP.md        # 后续开发路线
+    └── SUMMARIZER_DESIGN.md          # 摘要器架构设计文档
 ```
 
 ## 快速开始
 
 ### 环境要求
 
-- Python 3.7+（仅使用标准库，无需 pip install）
+- Python 3.7+（核心仅使用标准库）
+
+### 可选依赖
+
+```bash
+# 增强中文关键词抽取（不安装时自动回退到正则规则法）
+pip install jieba
+```
 
 ### 保存一条记忆
 
@@ -59,7 +70,7 @@ ClaudeMeory/
 # 直接传入文本
 python scripts/summarize_session.py \
   --topic "Claude Code 记忆机制" \
-  --text "用户希望通过 Hook 自动总结对话，并保存为 Markdown 记忆库。"
+  --text "团队决定使用 jieba 做中文分词增强，确定采用可插拔摘要器架构。下一步需要补充单元测试。"
 
 # 从文件读取
 python scripts/summarize_session.py \
@@ -67,14 +78,16 @@ python scripts/summarize_session.py \
   --file /path/to/conversation.txt
 ```
 
+生成的 Markdown 文件包含：摘要、关键词、关键决策、待办事项、原始对话摘录。
+
 ### 检索相关记忆
 
 ```bash
-# Markdown 格式输出（适合注入 Claude Code 上下文）
+# Markdown 格式输出（优先展示摘要、决策、待办）
 python scripts/retrieve_memory.py \
   --query "Claude Code 怎么保存历史对话"
 
-# JSON 格式输出（适合程序消费）
+# JSON 格式输出（含 decisions、todos 字段）
 python scripts/retrieve_memory.py \
   --query "登录问题" \
   --top-k 3 \
@@ -95,64 +108,110 @@ python scripts/update_index.py
 python tests/test_memory_skill.py
 ```
 
+## Markdown 记忆文件格式
+
+```markdown
+# 主题名称
+
+> 更新时间：2026-06-03 20:01:00
+
+## 摘要
+这里是结构化摘要。
+
+## 关键词
+关键词1, 关键词2, 关键词3
+
+## 关键决策
+- 决策1：采用 jieba 分词
+- 决策2：使用可插拔摘要器架构
+
+## 待办事项
+- 补充单元测试
+- 优化检索评分
+
+## 原始对话摘录
+```text
+原始对话内容...
+```
+---
+```
+
+## index.json 格式
+
+```json
+{
+  "topic_slug": {
+    "topic": "原始主题名称",
+    "file": "memory/topics/topic_slug_2026-06-03.md",
+    "keywords": ["关键词1", "关键词2"],
+    "summary": "摘要文本",
+    "decisions": ["决策1", "决策2"],
+    "todos": ["待办1", "待办2"],
+    "created_at": "2026-06-03 20:01:00",
+    "updated_at": "2026-06-03 20:01:00"
+  }
+}
+```
+
 ## MVP 能力边界
 
-### 已实现
+### 已实现（Phase 1 + Phase 2）
 
-- 结构化 Markdown 记忆保存（摘要、关键词、时间戳）
-- `index.json` 主题索引读写（含原子写入保护）
-- 基于关键词加权匹配的记忆检索
-- 检索结果格式化为 Claude Code 可注入上下文
-- 从 Markdown 文件重建索引（自动跳过 README.md 等说明文件）
-- 会话后写入 / 用户输入前检索的 Hook Shell 示例
-- 12 项测试覆盖核心流程和异常路径
+- 基于规则的本地摘要器（摘要、关键决策、待办事项抽取）
+- jieba 中文分词 + 停用词过滤（自动回退机制）
+- 可插拔摘要器架构（`BaseSummarizer` 抽象基类）
+- 多字段加权检索评分（主题/关键词/决策/待办/摘要 + 时间衰减）
+- 结构化 Markdown 记忆保存
+- `index.json` 主题索引（含 decisions/todos 字段）
+- 原子写入索引保护
+- 新旧 Markdown 格式兼容的索引重建
+- 检索结果优先展示结构化信息（摘要→决策→待办→内容）
+- Hook Shell 示例
+- 49 项测试覆盖核心流程和 CLI
 
 ### 已知限制
 
 | 限制 | 说明 | 计划解决阶段 |
 |------|------|-------------|
-| 摘要质量 | 当前为截断式摘要，非语义总结 | 第二阶段 |
-| 关键词抽取 | 规则法对中文支持粗糙 | 第二阶段 |
-| 检索精度 | 纯关键词匹配，无语义理解 | 第二阶段 / 第四阶段 |
+| 摘要非语义 | 当前为规则法截取/触发词匹配，非 LLM 语义理解 | 第三/四阶段 |
+| 检索非语义 | 关键词匹配，无向量相似度 | 第四阶段 |
 | 记忆合并 | 同主题多次写入可能碎片化 | 第四阶段 |
 | 项目隔离 | 所有记忆存在同一目录 | 第四阶段 |
 | 并发写入 | 无文件锁保护 | 第四阶段 |
 | Hook 接入 | 示例脚本需按实际 Claude Code Hook 规范适配 | 第三阶段 |
+| 决策/待办抽取 | 依赖触发词表，可能漏检或误检 | 第三阶段（LLM 增强） |
 
 ## 后续计划
 
 详见 `docs/DEVELOPMENT_ROADMAP.md`，四个阶段：
 
-1. **第一阶段**（当前）：工程化整理、文档完善、测试补全
-2. **第二阶段**：接入 LLM 增强摘要和关键词抽取质量
-3. **第三阶段**：Claude Code Hook / Skill / Plugin 生态正式接入
+1. **第一阶段**（已完成）：工程化整理、文档完善、测试补全
+2. **第二阶段**（已完成）：规则摘要器、中文关键词增强、决策/待办抽取、检索评分优化
+3. **第三阶段**：Claude Code Hook / Skill / Plugin 生态正式接入，LLM 摘要器
 4. **第四阶段**：向量检索、记忆合并、项目隔离、日志系统
 
 ## 常见问题 (FAQ)
 
 ### Q: 中文在终端显示乱码怎么办？
 
-A: 这是终端编码问题，不是文件问题。所有项目文件均为 UTF-8 编码。
-- **Windows PowerShell**：执行 `chcp 65001` 切换到 UTF-8 代码页，或在终端设置中启用 UTF-8。
-- **Git Bash**：通常默认支持 UTF-8。
-- **VS Code 终端**：在设置中确认 `terminal.integrated.defaultEncoding` 为 `utf-8`。
+A: 终端编码问题，所有项目文件均为 UTF-8 编码。Windows PowerShell 执行 `chcp 65001` 切换 UTF-8 代码页，或使用 Git Bash / VS Code 终端。
 
 ### Q: index.json 损坏了怎么办？
 
-A: 运行 `python scripts/update_index.py` 即可从 `memory/topics/` 下的 Markdown 文件重建索引。`load_index()` 在遇到损坏 JSON 时会自动返回空字典而不会崩溃。
+A: 运行 `python scripts/update_index.py` 即可从 Markdown 文件重建索引。`load_index()` 在遇到损坏 JSON 时自动返回空字典而不会崩溃。
 
 ### Q: 为什么检索不到相关记忆？
 
-A: 当前 MVP 使用简单关键词匹配，不是语义搜索。请尝试：
-- 使用更精确的关键词
-- 检查 `memory/index.json` 是否有对应的条目
-- 运行 `python scripts/update_index.py` 确保索引最新
-- 如果问题持续，这可能说明该记忆主题尚未被保存
+A: 当前使用关键词加权匹配，非语义搜索。请尝试使用更精确的关键词，检查 `memory/index.json` 是否有对应条目，或运行 `python scripts/update_index.py` 确保索引最新。
 
-### Q: Hook 示例和正式 Hook 配置有什么区别？
+### Q: jieba 是什么？必须安装吗？
 
-A: `hooks/` 目录下的脚本是**示例模板**，演示了调用逻辑。正式接入需要在 Claude Code 的 `settings.json` 中配置 Hook 事件、环境变量和输入格式。详细说明见 `docs/HOOK_SETUP.md`。
+A: jieba 是一个中文分词库，用于增强中文关键词抽取质量。**非必须安装**——没有 jieba 时系统自动回退到正则规则法，所有核心功能正常工作。
 
-### Q: 记忆文件在哪里？可以手动编辑吗？
+### Q: "关键决策"和"待办事项"有时候不准怎么办？
 
-A: 在 `memory/topics/` 目录下。所有记忆都是标准 Markdown 文件，可以用任何编辑器打开、修改或删除。修改后建议运行 `python scripts/update_index.py` 更新索引。
+A: 当前使用关键词触发词表进行规则匹配，不是 LLM 语义理解。如果对话中没有明确的决策/待办触发词，这些字段会显示"无明确关键决策"或"无明确待办事项"。后续版本将支持 LLM 摘要器以提升准确性。
+
+### Q: 如何自定义摘要器？
+
+A: 实现 `summarizers.BaseSummarizer` 的 `summarize()` 方法，然后传入 `save_memory(summarizer=your_summarizer)`。详见 `docs/SUMMARIZER_DESIGN.md`。

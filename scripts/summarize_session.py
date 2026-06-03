@@ -10,8 +10,16 @@ python scripts/summarize_session.py --topic "Claude Code 记忆机制" --text "�
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from memory_core import save_memory
+
+# Windows 下 stdout 默认编码为 cp936，确保输出可读。
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 
 def main() -> None:

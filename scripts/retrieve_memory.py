@@ -10,7 +10,16 @@ python scripts/retrieve_memory.py --query "Claude Code 如何恢复历史上下�
 from __future__ import annotations
 
 import argparse
+import sys
 from memory_core import retrieve_memory, format_context
+
+# Windows 下 stdout 默认编码为 cp936，导致 --json 输出解析失败。
+# reconfigure 在 Python 3.7+ 可用。
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 
 def main() -> None:
