@@ -188,17 +188,21 @@ class EmbeddingRetriever(BaseRetriever):
     """向量检索器占位接口。
 
     未来可接入 sentence-transformers / OpenAI Embeddings 等。
-    当前为 stub 实现，始终返回空结果。
+    当前为 stub 实现，调用时抛出 NotImplementedError。
     """
 
     def __init__(self, model_name: str = ""):
-        self.model_name = model_name
+        self.model_name = model_name or "未指定"
 
     def retrieve(
         self, query: str, records: Iterable[dict], top_k: int = 5
     ) -> list[dict]:
-        """当前未实现。返回空结果。"""
-        return []
+        """当前未实现。请使用 HybridRetriever 或 KeywordRetriever。"""
+        raise NotImplementedError(
+            f"EmbeddingRetriever (model={self.model_name}) 未实现，仅为占位接口。\n"
+            "当前可用检索器：HybridRetriever（多信号混合）、KeywordRetriever（关键词匹配）。\n"
+            "未来版本可安装 sentence-transformers 并接入真实向量检索。"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════

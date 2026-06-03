@@ -22,6 +22,13 @@ from typing import Iterable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+# 与 memory_core 保持一致的 slug 函数
+def _slugify(topic: str) -> str:
+    topic = topic.strip() or "untitled"
+    topic = re.sub(r"[\\/:*?\"<>|]+", "_", topic)
+    topic = re.sub(r"\s+", "_", topic)
+    return topic[:80]
+
 
 def _load_index(index_path: Path) -> dict:
     try:
@@ -342,7 +349,12 @@ def main() -> None:
             print("未发现重复记忆。")
 
     elif args.command == "merge":
-        keys = [k for k in index if args.topic in k or args.topic in index[k].get("topic", "")]
+        # 使用 slugified topic 做匹配，兼容中文和空格
+        slug = _slugify(args.topic)
+        keys = [k for k in index
+                if slug in k
+                or slug in _slugify(index[k].get("topic", ""))
+                or args.topic in index[k].get("topic", "")]
         if len(keys) < 2:
             print(f"未找到多条可合并的记忆（topic 匹配: {args.topic}）")
             return
@@ -353,8 +365,12 @@ def main() -> None:
             print(json.dumps(result, ensure_ascii=False, indent=2))
 
     elif args.command == "compact":
-        # 找到匹配的 Markdown 文件
-        found = list(top_dir.glob(f"*{args.topic[:20]}*.md"))
+        # 使用 slugified topic + 原 topic 双模式 glob
+        slug = _slugify(args.topic)
+        found = list(top_dir.glob(f"*{slug}*.md"))
+        if not found:
+            # 回退：尝试原 topic 前 20 字符匹配
+            found = list(top_dir.glob(f"*{args.topic[:20]}*.md"))
         if not found:
             print(f"未找到匹配的 Markdown 文件（topic: {args.topic}）")
             return

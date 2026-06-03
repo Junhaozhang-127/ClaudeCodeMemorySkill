@@ -26,6 +26,8 @@ Claude Code 默认每个会话相互独立。当开发者切换会话或重新�
 - **混合检索**：多信号加权 + score_breakdown 可解释评分
 - **记忆维护**：去重、合并、压缩、归档（dry-run 安全模式）
 - **安全增强**：路径防遍历、Markdown fence 转义、索引备份 + 文件锁
+- **发布工具**：`install.py`/`uninstall.py`/`upgrade.py`、`health_check.py`、`release_prepare.py`
+- **验收测试**：`run_acceptance.py --quick` 一键验证
 
 ## 项目结构
 

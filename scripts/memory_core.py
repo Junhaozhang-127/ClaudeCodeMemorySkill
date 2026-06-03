@@ -61,11 +61,26 @@ _LOCK_TIMEOUT = 5.0
 # Workspace 路径解析
 # ═══════════════════════════════════════════════════════════════
 
+def _get_env_workspace() -> str:
+    """从环境变量读取默认 workspace。"""
+    import os
+    ws = os.environ.get("CLAUDE_MEMORY_WORKSPACE", "")
+    if ws:
+        return ws
+    md = os.environ.get("CLAUDE_MEMORY_DIR", "")
+    if md:
+        return md  # 直接路径作为 workspace ID
+    return ""
+
+
 def _resolve_paths(workspace: str = ""):
     """根据 workspace_id 解析记忆目录路径。
 
+    优先级：参数 > 环境变量 CLAUDE_MEMORY_WORKSPACE > 默认 legacy。
     workspace 为空 / "default" 时使用旧 memory/ 路径。
     """
+    if not workspace:
+        workspace = _get_env_workspace()
     if not workspace or workspace == "default":
         return MEMORY_DIR, TOPICS_DIR, INDEX_FILE
     base = MEMORY_DIR / "workspaces" / workspace
@@ -550,7 +565,11 @@ def retrieve_memory(
     retriever=None,
 ) -> list[dict]:
     index = load_index(workspace)
-    records = list(index.values())
+    # 将 index key 注入为 id，确保每条记录可追溯和去重
+    records = []
+    for key, val in index.items():
+        val["id"] = key
+        records.append(val)
 
     if retriever is None and _RETRIEVAL_AVAILABLE:
         retriever = HybridRetriever(score_fn=score_record)
@@ -561,8 +580,9 @@ def retrieve_memory(
         # 回退：使用原有 score_record 逻辑
         results = _legacy_retrieve(query, records, top_k)
 
-    # 路径校验 + 读取内容 + 过滤越界记录
+    # 路径校验 + 读取内容 + 过滤越界记录 + 去重
     validated = []
+    seen_ids: set[str] = set()
     for r in results:
         file_rel = r.get("file", "")
         safe_path = _validate_file_path(file_rel, workspace)
@@ -583,6 +603,12 @@ def retrieve_memory(
             r["score_breakdown"] = {"total": r.get("score", 0)}
         if "matched_fields" not in r:
             r["matched_fields"] = []
+        # 去重（按 id 字段）
+        rid = r.get("id", "")
+        if rid and rid in seen_ids:
+            continue
+        if rid:
+            seen_ids.add(rid)
         validated.append(r)
 
     log_retrieve(query, top_k, len(validated), workspace)

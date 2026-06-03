@@ -1,6 +1,8 @@
 {
   "name": "claude-code-memory-skill",
-  "version": "0.3.0",
+  "version": "0.5.0",
+  "plugin_status": "manifest-template",
+  "_plugin_status_note": "Manifest template — not yet verified by Claude Code official plugin runtime. Commands are CLI-mapped via SKILL.md declarations.",
   "description": "Claude Code 会话记忆 Skill — 轻量级本地 Markdown 记忆库",
   "author": "Junhaozhang-127",
   "license": "MIT",

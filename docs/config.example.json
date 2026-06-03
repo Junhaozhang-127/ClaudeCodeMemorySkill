@@ -1,0 +1,10 @@
+{
+  "_comment": "Claude Code Memory Skill 配置示例。复制为 config.json 后按需修改。",
+  "workspace": "default",
+  "memory_dir": "memory",
+  "log_level": "INFO",
+  "track_access": false,
+  "max_context_chars": 1200,
+  "retriever": "hybrid",
+  "enable_embedding": false
+}
