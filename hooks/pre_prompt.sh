@@ -1,47 +1,59 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Claude Code Memory Skill — 用户输入前检索记忆 Hook
+# Claude Code Memory Skill — UserPromptSubmit Hook：检索相关历史记忆
 #
-# 在 Claude Code Hook 事件（PrePrompt / PreUserInput / BeforeConversation）
-# 触发时，根据用户输入检索相关历史记忆并输出上下文。
+# Claude Code UserPromptSubmit hook 通过 stdin 传入 JSON：
+#   {"session_id":"...", "transcript_path":"...", "prompt":"用户输入", ...}
 #
-# Claude Code 可注入以下环境变量（按实际版本确认）：
-#   CLAUDE_USER_INPUT            — 用户当前输入的文本
-#   CLAUDE_PROJECT_DIR           — 项目根目录
-#
-# 用法（手动调试）：
-#   bash hooks/pre_prompt.sh "用户当前问题"
+# 本脚本从中提取用户输入文本，检索相关历史记忆并输出为附加上下文。
 # ============================================================================
 set -euo pipefail
 
-# ── 项目路径解析 ────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# ── 参数获取 ────────────────────────────────────────────────
-QUERY="${1:-}"
+# ── Python 解释器检测（必须先于任何 Python 调用）──────────────
+PYTHON_BIN="python"
+if ! command -v "$PYTHON_BIN" &>/dev/null || ! "$PYTHON_BIN" --version &>/dev/null; then
+    PYTHON_BIN="python3"
+fi
+if ! command -v "$PYTHON_BIN" &>/dev/null || ! "$PYTHON_BIN" --version &>/dev/null; then
+    echo "[Memory Hook] 找不到可用的 Python，跳过检索" >&2
+    exit 0
+fi
 
-# 支持从 Claude Code 环境变量获取查询
+# ── 读取 hook stdin JSON ─────────────────────────────────────
+HOOK_INPUT="$(cat 2>/dev/null || true)"
+
+QUERY=""
+
+if [ -n "$HOOK_INPUT" ]; then
+    # 从 stdin JSON 提取 prompt 字段
+    QUERY=$(echo "$HOOK_INPUT" | "$PYTHON_BIN" -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    print(data.get('prompt', ''))
+except Exception:
+    pass
+" 2>/dev/null || true)
+fi
+
+# 回退：环境变量
 if [ -z "$QUERY" ] && [ -n "${CLAUDE_USER_INPUT:-}" ]; then
     QUERY="$CLAUDE_USER_INPUT"
 fi
 
+# 回退：命令行参数
+if [ -z "$QUERY" ] && [ -n "${1:-}" ]; then
+    QUERY="$1"
+fi
+
 if [ -z "$QUERY" ]; then
-    # 静默退出，不阻塞正常对话
     exit 0
 fi
 
-# ── Python 解释器检测 ───────────────────────────────────────
-PYTHON_BIN="python3"
-if ! command -v "$PYTHON_BIN" &>/dev/null; then
-    PYTHON_BIN="python"
-fi
-if ! command -v "$PYTHON_BIN" &>/dev/null; then
-    echo "[Memory Hook] 错误：找不到 Python 解释器" >&2
-    exit 1
-fi
-
-# ── 执行检索 ────────────────────────────────────────────────
+# ── 执行检索 ─────────────────────────────────────────────────
 cd "$PROJECT_DIR"
 
 "$PYTHON_BIN" scripts/retrieve_memory.py --query "$QUERY" --top-k 5
