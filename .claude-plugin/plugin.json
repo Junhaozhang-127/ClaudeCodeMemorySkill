@@ -1,0 +1,62 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "claude-code-memory-skill",
+  "version": "0.5.0",
+  "description": "Claude Code 会话记忆 Skill — 轻量级本地 Markdown 记忆库，自动保存对话为结构化记忆并在新会话中检索相关上下文",
+  "author": {
+    "name": "Junhaozhang-127",
+    "url": "https://github.com/Junhaozhang-127"
+  },
+  "license": "MIT",
+  "keywords": ["memory", "session", "markdown", "context"],
+  "repository": "https://github.com/Junhaozhang-127/ClaudeMeory",
+  "homepage": "https://github.com/Junhaozhang-127/ClaudeMeory#readme",
+
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "../hooks/post_conversation.sh",
+            "timeout": 30000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "../hooks/pre_prompt.sh",
+            "timeout": 15000
+          }
+        ]
+      }
+    ]
+  },
+
+  "userConfig": {
+    "memory_dir": {
+      "title": "Memory Directory",
+      "type": "string",
+      "description": "记忆存储目录（相对于项目根目录）",
+      "default": "memory"
+    },
+    "max_context_items": {
+      "title": "Max Context Items",
+      "type": "number",
+      "description": "检索时最多返回的记忆条数",
+      "default": 5
+    },
+    "use_jieba": {
+      "title": "Use Jieba Segmentation",
+      "type": "boolean",
+      "description": "是否使用 jieba 中文分词（需 pip install jieba）",
+      "default": true
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-meory-marketplace",
+  "description": "Claude Code 会话记忆 Skill 市场 — 轻量级本地 Markdown 记忆库插件",
+  "owner": {
+    "name": "Junhaozhang-127",
+    "url": "https://github.com/Junhaozhang-127"
+  },
+  "plugins": [
+    {
+      "name": "claude-code-memory-skill",
+      "description": "自动保存 Claude Code 会话为结构化 Markdown 记忆，并在新会话中根据用户输入自动检索和注入相关历史上下文。支持 Hook 自动化触发和 Slash Command 手动调用。",
+      "version": "0.5.0",
+      "source": "./",
+      "strict": false
+    }
+  ]
+}
