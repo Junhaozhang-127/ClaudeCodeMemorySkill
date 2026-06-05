@@ -33,6 +33,11 @@
             "type": "command",
             "command": "../hooks/pre_prompt.sh",
             "timeout": 15000
+          },
+          {
+            "type": "command",
+            "command": "../hooks/auto_save.sh",
+            "timeout": 30000
           }
         ]
       }
@@ -57,6 +62,12 @@
       "type": "boolean",
       "description": "是否使用 jieba 中文分词（需 pip install jieba）",
       "default": true
+    },
+    "auto_save_interval": {
+      "title": "Auto-Save Interval",
+      "type": "number",
+      "description": "每 N 轮对话自动保存一次记忆（默认 10，设为 0 禁用自动保存）",
+      "default": 10
     }
   }
 }

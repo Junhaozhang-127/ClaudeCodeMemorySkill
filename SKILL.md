@@ -42,10 +42,17 @@
 
 在以下时机自动或手动触发：
 
-- **自动**：Hook 事件 `Stop` 触发 → 调用 `post_conversation.sh`
+- **自动（轮次计时器）**：每 N 轮对话自动保存（默认 N=10），由 `UserPromptSubmit` Hook 调用 `auto_save.sh`
+- **自动（会话结束）**：Hook 事件 `Stop` 触发 → 调用 `post_conversation.sh`
 - **手动**：用户使用 `/memory save <主题>` 命令
 - **手动**：用户明确说"记住这个"或"保存这条记忆"
 - **阶段完成**：方案确定、Bug 修复完成、需求确认后
+
+自动保存间隔可通过以下方式配置（优先级从高到低）：
+1. 环境变量 `MEMORY_AUTO_SAVE_INTERVAL`（例如 `export MEMORY_AUTO_SAVE_INTERVAL=5`）
+2. `config.json` 中的 `auto_save_interval` 字段
+3. 默认值：10 轮
+设为 0 可禁用轮次自动保存。
 
 ## 何时检索记忆
 

@@ -55,9 +55,15 @@ python scripts/summarize_session.py --workspace my-project --topic "..." --text 
 ```
 
 ### Hook 自动化
-会话结束时自动保存、新会话开始时自动检索。支持 bash / Windows CMD / PowerShell。
+会话结束时自动保存、每次输入前自动检索。新增**轮次计时器自动保存**，每 N 轮对话自动保存（默认 10 轮），无需等到会话结束。
 
-详见 `docs/HOOK_SETUP.md`。
+```bash
+# 配置自动保存间隔
+export MEMORY_AUTO_SAVE_INTERVAL=5   # 每 5 轮自动保存
+export MEMORY_AUTO_SAVE_INTERVAL=0   # 禁用轮次自动保存
+```
+
+支持 bash / Windows CMD / PowerShell。详见 `docs/HOOK_SETUP.md`。
 
 ### 记忆维护
 去重、合并、压缩、归档 — 全部 dry-run 保护。
@@ -86,9 +92,13 @@ python scripts/memory_maintenance.py archive-old --days 180 --dry-run
 ClaudeMeory/
 ├── scripts/          # 核心 Python 脚本
 ├── hooks/            # Hook 脚本 (bash/bat/ps1)
+│   ├── pre_prompt.*      # 输入前检索
+│   ├── post_conversation.* # 会话结束保存
+│   └── auto_save.*       # 轮次自动保存计时器
 ├── memory/           # 记忆存储目录
-│   ├── index.json    # 主题索引
-│   └── topics/       # Markdown 记忆文件
+│   ├── index.json        # 主题索引
+│   ├── .turn_state.json  # 自动保存轮次计数器
+│   └── topics/           # Markdown 记忆文件
 ├── docs/             # 文档
 │   ├── CAPABILITY_MATRIX.md    # 能力矩阵
 │   ├── DEVELOPMENT_ROADMAP.md  # 开发路线图
@@ -117,6 +127,7 @@ python scripts/run_acceptance.py --quick # 7 项验收测试
 # 环境变量
 export CLAUDE_MEMORY_WORKSPACE=my-project
 export CLAUDE_MEMORY_DIR=/path/to/memories
+export MEMORY_AUTO_SAVE_INTERVAL=10   # 每 N 轮自动保存（默认 10）
 
 # 或使用 config.json
 python scripts/install.py --interactive  # 交互式生成

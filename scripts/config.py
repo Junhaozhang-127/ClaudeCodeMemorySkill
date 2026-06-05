@@ -38,6 +38,7 @@ class MemoryConfig:
     index_backup_max: int = 10
     track_access: bool = False
     lock_timeout: float = 5.0
+    auto_save_interval: int = 10
 
     @property
     def is_legacy_mode(self) -> bool:

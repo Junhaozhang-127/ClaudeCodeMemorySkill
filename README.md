@@ -55,9 +55,15 @@ python scripts/summarize_session.py --workspace my-project --topic "..." --text 
 ```
 
 ### Hook Automation
-Auto-save at session end, auto-retrieve at session start. Supports bash / Windows CMD / PowerShell.
+Auto-save at session end, auto-retrieve at session start. Features a **turn-based auto-save timer** that saves your conversation every N turns (default 10) — no need to wait until session end.
 
-See `docs/HOOK_SETUP.md` for details.
+```bash
+# Configure auto-save interval
+export MEMORY_AUTO_SAVE_INTERVAL=5   # Save every 5 turns
+export MEMORY_AUTO_SAVE_INTERVAL=0   # Disable turn-based auto-save
+```
+
+Supports bash / Windows CMD / PowerShell. See `docs/HOOK_SETUP.md` for details.
 
 ### Memory Maintenance
 Deduplication, merging, compaction, archiving — all with dry-run protection.
@@ -86,9 +92,13 @@ python scripts/memory_maintenance.py archive-old --days 180 --dry-run
 ClaudeMeory/
 ├── scripts/          # Core Python scripts
 ├── hooks/            # Hook scripts (bash/bat/ps1)
+│   ├── pre_prompt.*      # Retrieve on input
+│   ├── post_conversation.* # Save on session end
+│   └── auto_save.*       # Turn-based auto-save timer
 ├── memory/           # Memory storage directory
-│   ├── index.json    # Topic index
-│   └── topics/       # Markdown memory files
+│   ├── index.json        # Topic index
+│   ├── .turn_state.json  # Auto-save turn counter
+│   └── topics/           # Markdown memory files
 ├── docs/             # Documentation
 │   ├── CAPABILITY_MATRIX.md    # Capability matrix
 │   ├── DEVELOPMENT_ROADMAP.md  # Development roadmap
@@ -117,6 +127,7 @@ Priority: CLI arguments > environment variables > config.json > defaults
 # Environment variables
 export CLAUDE_MEMORY_WORKSPACE=my-project
 export CLAUDE_MEMORY_DIR=/path/to/memories
+export MEMORY_AUTO_SAVE_INTERVAL=10   # Auto-save every N turns (default 10)
 
 # Or use config.json
 python scripts/install.py --interactive  # Interactive generation
