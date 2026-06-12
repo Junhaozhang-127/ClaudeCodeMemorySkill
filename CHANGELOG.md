@@ -8,7 +8,10 @@
 - `rebuild_index` 增强：索引键改为基于主题名（而非文件名），同一主题的多日文件自动合并；支持从 Markdown blockquote 解析 `创建时间` / `更新时间`，回退到文件 stat
 - 新增 `_merge_unique()` 合并辅助函数，`_parse_markdown_meta()` 元数据解析函数
 
-**影响范围**: `scripts/memory_core.py`（save_memory, rebuild_index, 新增辅助函数）
+**修复**
+- `auto_save.sh` Hook 路径从相对路径 `../hooks/auto_save.sh` 改为绝对路径，与 `pre_prompt.sh`、`post_conversation.sh` 保持一致
+
+**影响范围**: `scripts/memory_core.py`, `.claude-plugin/plugin.json`
 
 ---
 

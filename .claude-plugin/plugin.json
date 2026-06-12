@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "claude-code-memory-skill",
-  "version": "0.5.0",
+  "version": "0.5.2",
   "description": "Claude Code 会话记忆 Skill — 轻量级本地 Markdown 记忆库，自动保存对话为结构化记忆并在新会话中检索相关上下文",
   "author": {
     "name": "Junhaozhang-127",
@@ -36,7 +36,7 @@
           },
           {
             "type": "command",
-            "command": "../hooks/auto_save.sh",
+            "command": "bash \"D:/SmartManufacturingWorkshop/program/Skill/ClaudeMeory/hooks/auto_save.sh\"",
             "timeout": 30000
           }
         ]
