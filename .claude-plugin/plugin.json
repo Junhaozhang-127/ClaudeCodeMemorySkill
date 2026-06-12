@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${PLUGIN_DIR}/hooks/post_conversation.sh\"",
+            "command": "bash \"D:/SmartManufacturingWorkshop/program/Skill/ClaudeMeory/hooks/post_conversation.sh\"",
             "timeout": 30000
           }
         ]
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${PLUGIN_DIR}/hooks/pre_prompt.sh\"",
+            "command": "bash \"D:/SmartManufacturingWorkshop/program/Skill/ClaudeMeory/hooks/pre_prompt.sh\"",
             "timeout": 15000
           },
           {
