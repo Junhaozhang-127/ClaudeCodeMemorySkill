@@ -10,6 +10,22 @@ REM   CLAUDE_CONVERSATION_TITLE   — fallback topic
 REM ============================================================================
 setlocal disabledelayedexpansion
 
+REM ── Python detection (verify actual executability) ──────────
+set "PYTHON_BIN="
+python3 -c "import sys; print(sys.executable)" >nul 2>&1
+if %errorlevel% equ 0 (
+    set "PYTHON_BIN=python3"
+) else (
+    python -c "import sys; print(sys.executable)" >nul 2>&1
+    if %errorlevel% equ 0 (
+        set "PYTHON_BIN=python"
+    )
+)
+if "%PYTHON_BIN%"=="" (
+    echo [Memory Hook] No usable Python interpreter found
+    exit /b 1
+)
+
 set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%.." 2>nul || exit /b 1
 
@@ -20,7 +36,7 @@ if "%TOPIC%"=="" set "TOPIC=Untitled"
 set "CONV_FILE=%~2"
 
 if not "%CONV_FILE%"=="" if exist "%CONV_FILE%" (
-    python scripts\summarize_session.py --topic "%TOPIC%" --file "%CONV_FILE%"
+    "%PYTHON_BIN%" scripts\summarize_session.py --topic "%TOPIC%" --file "%CONV_FILE%"
     exit /b %errorlevel%
 )
 

@@ -38,11 +38,21 @@ if (-not $Topic) {
     $Topic = "Untitled-" + (Get-Date -Format 'yyyyMMdd-HHmm')
 }
 
-# ---- detect Python ----
+# ---- detect Python (verify actual executability, not just PATH existence) ----
 $PythonBin = $null
 foreach ($candidate in @("python3", "python")) {
     $found = Get-Command $candidate -ErrorAction SilentlyContinue
-    if ($found) { $PythonBin = $candidate; break }
+    if ($found) {
+        try {
+            $null = & $candidate -c "import sys; print(sys.executable)" 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                $PythonBin = $candidate
+                break
+            }
+        } catch {
+            continue
+        }
+    }
 }
 if (-not $PythonBin) {
     Write-Error "[Memory Hook] Python not found in PATH"

@@ -33,13 +33,16 @@ for arg in "$@"; do
     esac
 done
 
-# ── Python 检测 ─────────────────────────────────────────────
-PYTHON_BIN="python3"
-if ! command -v "$PYTHON_BIN" &>/dev/null; then
-    PYTHON_BIN="python"
-fi
-if ! command -v "$PYTHON_BIN" &>/dev/null; then
-    echo -e "${RED}错误：找不到 Python (>=3.7)${NC}"
+# ── Python 检测（验证实际可执行性）───────────────────────────
+PYTHON_BIN=""
+for candidate in "python3" "python"; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "import sys; print(sys.executable)" >/dev/null 2>&1; then
+        PYTHON_BIN="$candidate"
+        break
+    fi
+done
+if [ -z "$PYTHON_BIN" ]; then
+    echo -e "${RED}错误：找不到可用的 Python 解释器${NC}"
     exit 1
 fi
 

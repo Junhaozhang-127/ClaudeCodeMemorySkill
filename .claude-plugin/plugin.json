@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "../hooks/post_conversation.sh",
+            "command": "bash \"${PLUGIN_DIR}/hooks/post_conversation.sh\"",
             "timeout": 30000
           }
         ]
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "../hooks/pre_prompt.sh",
+            "command": "bash \"${PLUGIN_DIR}/hooks/pre_prompt.sh\"",
             "timeout": 15000
           },
           {

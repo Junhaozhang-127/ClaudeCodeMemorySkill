@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.1 — Hook 可靠性增强 (2026-06-12)
+
+**修复**
+- Hook 命令路径：`${CLAUDE_PROJECT_DIR}` → `${PLUGIN_DIR}`，确保插件安装在任意位置均可正确解析 Hook 脚本
+- Python 解释器检测增强（所有 Hook 脚本）：不再仅检查 PATH 存在性（`command -v` / `Get-Command`），改为实际执行 `python -c "import sys; print(sys.executable)"` 验证解释器真实可用，防止 Windows Store 存根等假阳性
+- Batch 脚本（`.bat`）新增 Python 检测逻辑，此前完全缺失
+
+**影响范围**: `plugin.json`, `hooks/*.sh`, `hooks/*.ps1`, `hooks/*.bat`, `install.sh`
+
+---
+
 ## Phase 5 (v0.5.0) — 发布前增强与长期可用性
 
 **新增**

@@ -12,13 +12,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# ── Python 解释器检测（必须先于任何 Python 调用）──────────────
-PYTHON_BIN="python"
-if ! command -v "$PYTHON_BIN" &>/dev/null || ! "$PYTHON_BIN" --version &>/dev/null; then
-    PYTHON_BIN="python3"
-fi
-if ! command -v "$PYTHON_BIN" &>/dev/null || ! "$PYTHON_BIN" --version &>/dev/null; then
-    echo "[Memory Hook] 找不到可用的 Python，跳过检索" >&2
+# ── Python 解释器检测（验证实际可执行性）────────────────────
+PYTHON_BIN=""
+for candidate in "python3" "python"; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "import sys; print(sys.executable)" >/dev/null 2>&1; then
+        PYTHON_BIN="$candidate"
+        break
+    fi
+done
+if [ -z "$PYTHON_BIN" ]; then
+    echo "[Memory Hook] 找不到可用的 Python 解释器，跳过检索" >&2
     exit 0
 fi
 
@@ -56,7 +59,7 @@ fi
 # ── 执行检索 ─────────────────────────────────────────────────
 cd "$PROJECT_DIR"
 
-"$PYTHON_BIN" scripts/retrieve_memory.py --query "$QUERY" --top-k 5
+"$PYTHON_BIN" "$PROJECT_DIR/scripts/retrieve_memory.py" --query "$QUERY" --top-k 5
 
 echo ""
 echo "[Memory Hook] 检索完成。以上上下文将注入 Claude Code。"

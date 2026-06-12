@@ -20,13 +20,16 @@ if [ -z "$HOOK_INPUT" ]; then
     exit 0
 fi
 
-# ── Python 解释器检测 ────────────────────────────────────────
-PYTHON_BIN="python"
-if ! command -v "$PYTHON_BIN" &>/dev/null || ! "$PYTHON_BIN" --version &>/dev/null; then
-    PYTHON_BIN="python3"
-fi
-if ! command -v "$PYTHON_BIN" &>/dev/null || ! "$PYTHON_BIN" --version &>/dev/null; then
-    echo "[Memory Hook] 找不到可用的 Python，跳过保存" >&2
+# ── Python 解释器检测（验证实际可执行性）────────────────────
+PYTHON_BIN=""
+for candidate in "python3" "python"; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "import sys; print(sys.executable)" >/dev/null 2>&1; then
+        PYTHON_BIN="$candidate"
+        break
+    fi
+done
+if [ -z "$PYTHON_BIN" ]; then
+    echo "[Memory Hook] 找不到可用的 Python 解释器，跳过保存" >&2
     exit 0
 fi
 
@@ -164,7 +167,7 @@ try:
     project_dir = os.getcwd()
 
     result = subprocess.run(
-        [sys.executable, "scripts/summarize_session.py",
+        [sys.executable, os.path.join(project_dir, "scripts", "summarize_session.py"),
          "--topic", topic,
          "--file", tmp.name],
         cwd=project_dir,
