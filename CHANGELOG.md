@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.5.2 — 记忆更新与时间记录增强 (2026-06-12)
+
+**新增**
+- 记忆 Markdown 文件新增 `创建时间` 字段，与 `更新时间` 并列记录，方便追溯记忆生命周期
+- 智能更新与合并：同一主题再次保存时，自动复用已有文件、合并 keywords/decisions/todos（去重）、保留原始 `created_at`、刷新 `updated_at`
+- `rebuild_index` 增强：索引键改为基于主题名（而非文件名），同一主题的多日文件自动合并；支持从 Markdown blockquote 解析 `创建时间` / `更新时间`，回退到文件 stat
+- 新增 `_merge_unique()` 合并辅助函数，`_parse_markdown_meta()` 元数据解析函数
+
+**影响范围**: `scripts/memory_core.py`（save_memory, rebuild_index, 新增辅助函数）
+
+---
+
 ## v0.5.1 — Hook 可靠性增强 (2026-06-12)
 
 **修复**

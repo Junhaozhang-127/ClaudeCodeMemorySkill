@@ -41,7 +41,10 @@ python scripts/update_index.py
 ## Core Capabilities
 
 ### Structured Memory
-Automatically extracts summaries, key decisions, and TODOs from conversations into structured Markdown memory files.
+Automatically extracts summaries, key decisions, and TODOs from conversations into structured Markdown memory files. Each memory records both **creation time** and **last update time** for clear traceability.
+
+### Intelligent Update & Merge
+Saving to the same topic intelligently updates the existing memory: keywords, decisions, and TODOs are merged (with deduplication), the `created_at` timestamp is preserved, and `updated_at` is refreshed. New conversation blocks are appended to the same file — no duplicate files.
 
 ### Hybrid Retrieval
 Multi-signal weighted scoring (topic > keywords > decisions > TODOs > summary), returning interpretable `score_breakdown` results.

@@ -405,6 +405,20 @@ def _safe_code_fence(text: str) -> str:
     return text
 
 
+def _merge_unique(new_items: list[str], existing_items: list[str]) -> list[str]:
+    """合并两个列表，去重，保持顺序（existing 在前，new 中不重复的追加）。
+
+    比较时忽略大小写和首尾空白，但保留原始格式。
+    """
+    result = list(existing_items)
+    existing_set = {item.strip().lower() for item in existing_items}
+    for item in new_items:
+        if item.strip().lower() not in existing_set:
+            result.append(item)
+            existing_set.add(item.strip().lower())
+    return result
+
+
 # ═══════════════════════════════════════════════════════════════
 # 记忆保存
 # ═══════════════════════════════════════════════════════════════
@@ -416,14 +430,24 @@ def save_memory(
     summarizer=None,
     workspace: str = "",
 ) -> Path:
+    """保存一条记忆到 Markdown 文件并更新索引。
+
+    如果同 topic 已存在记录，则：
+      - 复用已有文件路径（不会按日期新建文件）
+      - 合并 keywords / decisions / todos（去重）
+      - 保留原始 created_at，刷新 updated_at
+      - 在文件末尾追加新的对话块
+    """
     ensure_memory_dirs(workspace)
     _, topics_dir, index_file = _resolve_paths(workspace)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     date_str = datetime.now().strftime("%Y-%m-%d")
     safe_topic = slugify_topic(topic)
-    filename = f"{safe_topic}_{date_str}.md"
-    filepath = topics_dir / filename
+
+    # 加载已有索引，检查是否存在同 topic 记录
+    index = load_index(workspace)
+    existing = index.get(safe_topic)
 
     if summarizer is None:
         summarizer = _get_default_summarizer()
@@ -431,15 +455,39 @@ def save_memory(
 
     summary = result.summary or simple_summary(conversation_text)
     keywords = result.keywords if result.keywords else extract_keywords(conversation_text, topic)
-    decisions_lines = _format_list_section(result.decisions, "无明确关键决策。")
-    todos_lines = _format_list_section(result.todos, "无明确待办事项。")
-    keywords_str = ", ".join(keywords) if keywords else "暂无"
+
+    # 确定文件路径和合并状态
+    if existing:
+        filepath = PROJECT_ROOT / existing["file"]
+        created_at = existing.get("created_at", now)
+        if append:
+            # 追加模式：合并新旧数据
+            merged_keywords = _merge_unique(keywords, existing.get("keywords", []))
+            merged_decisions = _merge_unique(result.decisions, existing.get("decisions", []))
+            merged_todos = _merge_unique(result.todos, existing.get("todos", []))
+        else:
+            # 覆盖模式：仅使用新数据
+            merged_keywords = keywords
+            merged_decisions = result.decisions
+            merged_todos = result.todos
+    else:
+        filename = f"{safe_topic}_{date_str}.md"
+        filepath = topics_dir / filename
+        created_at = now
+        merged_keywords = keywords
+        merged_decisions = result.decisions
+        merged_todos = result.todos
+
+    decisions_lines = _format_list_section(merged_decisions, "无明确关键决策。")
+    todos_lines = _format_list_section(merged_todos, "无明确待办事项。")
+    keywords_str = ", ".join(merged_keywords) if merged_keywords else "暂无"
 
     # 转义原文中的 fence
     safe_text = _safe_code_fence(conversation_text.strip())
 
     block = f"""# {topic}
 
+> 创建时间：{created_at}
 > 更新时间：{now}
 
 ## 摘要
@@ -474,15 +522,14 @@ def save_memory(
     else:
         filepath.write_text(block, encoding="utf-8")
 
-    index = load_index(workspace)
     record = MemoryRecord(
         topic=topic,
         file=str(filepath.relative_to(PROJECT_ROOT)),
-        keywords=keywords,
+        keywords=merged_keywords,
         summary=summary,
-        decisions=result.decisions,
-        todos=result.todos,
-        created_at=index.get(safe_topic, {}).get("created_at", now),
+        decisions=merged_decisions,
+        todos=merged_todos,
+        created_at=created_at,
         updated_at=now,
     )
     index[safe_topic] = asdict(record)
@@ -785,20 +832,50 @@ def _parse_markdown_list(content: str, heading: str) -> list[str]:
     return items
 
 
+def _parse_markdown_meta(content: str) -> dict[str, str]:
+    """从 Markdown 头部 blockquote 解析元数据（创建时间 / 更新时间）。
+
+    支持新旧两种格式：
+      新: > 创建时间：2026-06-12 16:00:00
+          > 更新时间：2026-06-12 16:30:00
+      旧: > 更新时间：2026-06-12 16:30:00
+    """
+    meta: dict[str, str] = {}
+    m = re.search(r"^>\s*创建时间[：:]\s*(.+?)$", content, flags=re.MULTILINE)
+    if m:
+        meta["created_at"] = m.group(1).strip()
+    m = re.search(r"^>\s*更新时间[：:]\s*(.+?)$", content, flags=re.MULTILINE)
+    if m:
+        meta["updated_at"] = m.group(1).strip()
+    return meta
+
+
+def _extract_topic_from_markdown(content: str, path: Path) -> str:
+    """从 Markdown 内容提取主题名。"""
+    first_heading = re.search(r"^#\s+(.+)$", content, flags=re.MULTILINE)
+    return first_heading.group(1).strip() if first_heading else path.stem
+
+
 def rebuild_index(workspace: str = "") -> dict:
+    """从 topics/ 目录下的 Markdown 文件重建 index.json。
+
+    使用主题名（而非文件名）作为索引键，确保同一主题的多日追加
+    合并为一条记录。同一键出现多次时，合并 keywords/decisions/todos，
+    保留最早的 created_at 和最晚的 updated_at。
+    """
     _, topics_dir, _ = _resolve_paths(workspace)
     ensure_memory_dirs(workspace)
     index: dict = {}
     scan_count = 0
 
-    for path in topics_dir.glob("*.md"):
+    for path in sorted(topics_dir.glob("*.md")):
         if not is_memory_markdown(path):
             continue
         scan_count += 1
         content = path.read_text(encoding="utf-8")
 
-        first_heading = re.search(r"^#\s+(.+)$", content, flags=re.MULTILINE)
-        topic = first_heading.group(1).strip() if first_heading else path.stem
+        topic = _extract_topic_from_markdown(content, path)
+        key = slugify_topic(topic)
 
         summary_text = _parse_markdown_section(content, "摘要")
         summary = simple_summary(summary_text) if summary_text else simple_summary(content)
@@ -811,21 +888,36 @@ def rebuild_index(workspace: str = "") -> dict:
         decisions = _parse_markdown_list(content, "关键决策")
         todos = _parse_markdown_list(content, "待办事项")
 
+        # 优先从 markdown 头部解析时间，回退到文件 stat
+        meta = _parse_markdown_meta(content)
         stat = path.stat()
-        created = datetime.fromtimestamp(stat.st_ctime).strftime("%Y-%m-%d %H:%M:%S")
-        updated = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        created = meta.get("created_at") or datetime.fromtimestamp(stat.st_ctime).strftime("%Y-%m-%d %H:%M:%S")
+        updated = meta.get("updated_at") or datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
 
-        key = slugify_topic(path.stem)
-        index[key] = asdict(MemoryRecord(
-            topic=topic,
-            file=str(path.relative_to(PROJECT_ROOT)),
-            keywords=keywords,
-            summary=summary,
-            decisions=decisions,
-            todos=todos,
-            created_at=created,
-            updated_at=updated,
-        ))
+        if key in index:
+            # 合并到已有记录
+            existing = index[key]
+            existing["keywords"] = _merge_unique(keywords, existing.get("keywords", []))
+            existing["decisions"] = _merge_unique(decisions, existing.get("decisions", []))
+            existing["todos"] = _merge_unique(todos, existing.get("todos", []))
+            # 保留最早的 created_at
+            if created < existing.get("created_at", ""):
+                existing["created_at"] = created
+            # 保留最晚的 updated_at
+            if updated > existing.get("updated_at", ""):
+                existing["updated_at"] = updated
+                existing["file"] = str(path.relative_to(PROJECT_ROOT))
+        else:
+            index[key] = asdict(MemoryRecord(
+                topic=topic,
+                file=str(path.relative_to(PROJECT_ROOT)),
+                keywords=keywords,
+                summary=summary,
+                decisions=decisions,
+                todos=todos,
+                created_at=created,
+                updated_at=updated,
+            ))
 
     save_index(index, workspace)
     log_rebuild(scan_count, len(index), workspace)

@@ -1,7 +1,7 @@
 # Claude Code 会话记忆 Skill MVP 项目结构说明
 
 > 生成日期：2026-06-03  
-> 项目路径：`D:\SmartManufacturingWorkshop\program\ClaudeMeory`  
+> 项目路径：`D:\SmartManufacturingWorkshop\program\Skill\ClaudeMeory`  
 > 项目定位：Claude Code 会话记忆 Skill MVP，本地 Markdown 记忆库原型
 
 ## 项目概述
