@@ -46,8 +46,8 @@ except ImportError:
     log_save = log_retrieve = log_rebuild = log_warning = log_error = _noop
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-MEMORY_DIR = PROJECT_ROOT / "memory"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]  # scripts → ClaudeMeory → Skill → program/
+MEMORY_DIR = PROJECT_ROOT / "Meory" / "memory"
 TOPICS_DIR = MEMORY_DIR / "topics"
 INDEX_FILE = MEMORY_DIR / "index.json"
 

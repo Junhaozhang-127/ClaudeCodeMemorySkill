@@ -23,6 +23,7 @@ from pathlib import Path
 from turn_counter import should_auto_save, get_interval
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
+PROGRAM_ROOT = Path(__file__).resolve().parents[3]  # scripts → ClaudeMeory → Skill → program/
 
 
 def parse_hook_stdin() -> dict:
@@ -213,7 +214,7 @@ def main() -> None:
         return
 
     interval = args.interval or get_interval()
-    memory_dir = str(PROJECT_DIR / "memory")
+    memory_dir = str(PROGRAM_ROOT / "Meory" / "memory")
 
     # 检查是否需自动保存
     should_save, state = should_auto_save(
