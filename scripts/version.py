@@ -6,9 +6,9 @@ version.py — 项目版本与元信息
 
 from __future__ import annotations
 
-__version__ = "0.5.0"
-PHASE = "Phase 5"
-BUILD_STATUS = "release-candidate"
+__version__ = "0.6.0"
+PHASE = "Phase 6"
+BUILD_STATUS = "development"
 
 
 def get_version_info() -> dict:
@@ -25,8 +25,14 @@ def get_version_info() -> dict:
         "retrievers": {
             "keyword": "implemented",
             "hybrid": "implemented",
-            "embedding": "stub",
+            "embedding": "implemented",
+            "semantic": "implemented",
         },
+        "summarizers": {
+            "rule": "implemented",
+            "llm": "implemented",
+        },
+        "memory_lifecycle": "implemented",
         "storage": "markdown + json",
         "workspace_support": True,
         "plugin_status": "manifest-template",

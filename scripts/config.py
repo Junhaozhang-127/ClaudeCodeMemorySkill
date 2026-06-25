@@ -39,6 +39,19 @@ class MemoryConfig:
     track_access: bool = False
     lock_timeout: float = 5.0
     auto_save_interval: int = 10
+    # v0.6.0: embedding + LLM 配置
+    embedding_provider: str = "auto"      # "auto" / "openai" / "fake"
+    embedding_model: str = ""             # 空则使用 provider 默认值
+    embedding_dimension: int = 1536       # fake 模式下可调
+    llm_provider: str = "auto"            # "auto" / "openai" / "fake"
+    llm_model: str = ""                   # 空则使用 provider 默认值
+    llm_api_base: str = ""                # 空则使用 provider 默认值
+    retrieval_mode: str = "hybrid"        # "keyword" / "semantic" / "hybrid"
+    summary_mode: str = "rule"            # "rule" / "llm" / "auto"
+    # v0.6.0: memory lifecycle
+    default_ttl_days: int = 365           # 默认 TTL（天），0=永不过期
+    short_term_ttl_days: int = 30         # 短期记忆 TTL
+    auto_expire_enabled: bool = False     # 是否在 save 时自动检查过期
 
     @property
     def is_legacy_mode(self) -> bool:

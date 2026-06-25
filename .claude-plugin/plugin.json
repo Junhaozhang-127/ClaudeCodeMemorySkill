@@ -1,16 +1,43 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "claude-code-memory-skill",
-  "version": "0.5.2",
-  "description": "Claude Code 会话记忆 Skill — 轻量级本地 Markdown 记忆库，自动保存对话为结构化记忆并在新会话中检索相关上下文",
+  "version": "0.6.0",
+  "description": "Claude Code 会话记忆 Skill — 轻量级本地 Markdown 记忆库，支持语义检索、LLM 摘要、生命周期管理",
   "author": {
     "name": "Junhaozhang-127",
     "url": "https://github.com/Junhaozhang-127"
   },
   "license": "MIT",
-  "keywords": ["memory", "session", "markdown", "context"],
+  "keywords": ["memory", "session", "markdown", "context", "embedding", "semantic-search"],
   "repository": "https://github.com/Junhaozhang-127/ClaudeMeory",
   "homepage": "https://github.com/Junhaozhang-127/ClaudeMeory#readme",
+
+  "commands": {
+    "memory:save": {
+      "description": "保存当前对话为结构化 Markdown 记忆",
+      "usage": "/memory save <主题> [--text <内容>] [--file <路径>] [--summary-mode rule|llm|auto]",
+      "script": "scripts/summarize_session.py",
+      "handler": "commands.memory_save:SAVE_COMMAND"
+    },
+    "memory:retrieve": {
+      "description": "检索相关历史记忆并注入上下文",
+      "usage": "/memory retrieve <查询> [--mode keyword|semantic|hybrid]",
+      "script": "scripts/retrieve_memory.py",
+      "handler": "commands.memory_retrieve:RETRIEVE_COMMAND"
+    },
+    "memory:rebuild": {
+      "description": "从 Markdown 文件重建 index.json 索引",
+      "usage": "/memory rebuild [--workspace <name>]",
+      "script": "scripts/update_index.py",
+      "handler": "commands.memory_rebuild:REBUILD_COMMAND"
+    },
+    "memory:manage": {
+      "description": "记忆管理 — 质量报告、去重、过期、合并、归档",
+      "usage": "/memory manage <action> [options]  actions: quality / dedup / expire / merge / archive",
+      "script": "scripts/memory_maintenance.py",
+      "handler": "commands.memory_manage:MANAGE_COMMAND"
+    }
+  },
 
   "hooks": {
     "Stop": [
@@ -68,6 +95,18 @@
       "type": "number",
       "description": "每 N 轮对话自动保存一次记忆（默认 10，设为 0 禁用自动保存）",
       "default": 10
+    },
+    "retrieval_mode": {
+      "title": "Retrieval Mode",
+      "type": "string",
+      "description": "检索模式: keyword / semantic / hybrid",
+      "default": "hybrid"
+    },
+    "summary_mode": {
+      "title": "Summary Mode",
+      "type": "string",
+      "description": "摘要模式: rule / llm / auto",
+      "default": "rule"
     }
   }
 }

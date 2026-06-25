@@ -6,6 +6,17 @@
   "track_access": false,
   "max_context_chars": 1200,
   "retriever": "hybrid",
+  "retrieval_mode": "hybrid",
+  "summary_mode": "rule",
   "enable_embedding": false,
-  "auto_save_interval": 10
+  "embedding_provider": "auto",
+  "embedding_model": "",
+  "embedding_dimension": 1536,
+  "llm_provider": "auto",
+  "llm_model": "",
+  "llm_api_base": "",
+  "auto_save_interval": 10,
+  "default_ttl_days": 365,
+  "short_term_ttl_days": 30,
+  "auto_expire_enabled": false
 }

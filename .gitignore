@@ -32,6 +32,8 @@ memory/tmp/
 memory/cache/
 memory/backups/
 memory/*.lock
+memory/.turn_state.json
+memory/embedding_cache.json
 
 # IDE
 .idea/

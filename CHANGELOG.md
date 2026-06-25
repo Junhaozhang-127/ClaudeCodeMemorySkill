@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.6.0 — 语义检索 + LLM 摘要 + 命令系统升级 + 记忆生命周期 (2026-06-25)
+
+**新增 (Task 1: EmbeddingRetriever)**
+- `scripts/embedding_provider.py` — `EmbeddingProvider` ABC + `FakeEmbeddingProvider` (ngram-based) + `OpenAIEmbeddingProvider`
+- `scripts/embedding_cache.py` — JSON-file-based embedding 缓存，支持模型切换自动失效
+- `retrieval.SemanticRetriever` — 完整 embedding 语义检索实现（替代旧 stub）
+- `HybridRetriever` 三种模式: `keyword` / `semantic` / `hybrid`
+- Cosine similarity + 可配置降级: provider 不可用时自动 keyword fallback
+
+**新增 (Task 2: LLM 摘要器)**
+- `scripts/llm_provider.py` — `LLMProvider` ABC + `FakeLLMProvider` + `OpenAILLMProvider`
+- `summarizers.LLMSummarizer` — 3 类摘要 (`brief` / `semantic` / `memory`), chunk-merge 长文本处理, 无 LLM 时 fallback 到 `RuleBasedSummarizer`
+- `summarizers.EnhancedSummaryResult` — 含 entities, key_points, open_questions, metadata
+
+**新增 (Task 3: Slash Command 升级)**
+- `commands/base.py` — `Command` + `CommandResult` 数据结构
+- `commands/registry.py` — `CommandRegistry` 注册/查找/分发, 编辑距离建议
+- `commands/memory_save.py` — `/memory save` 命令处理器 (支持 rule/llm/auto 摘要模式)
+- `commands/memory_retrieve.py` — `/memory retrieve` 命令处理器 (支持 keyword/semantic/hybrid 检索)
+- `commands/memory_manage.py` — `/memory manage` 命令处理器 (quality/dedup/expire/merge/archive)
+
+**新增 (Task 4: 记忆质量增强)**
+- `scripts/memory_lifecycle.py` — 状态机 (active/archived/expired/merged/deleted), TTL 过期, 质量报告
+- `MemoryRecord` 扩展字段: `status`, `content_hash`, `ttl_days`, `tags`, `access_count`, `merged_into` 等 15 个新字段
+- `retrieve_memory()` 支持 `tags` 过滤 + `include_expired` 参数
+- `generate_quality_report()` — 记忆质量报告含去重/过期/低质量检测 + 推荐动作
+
+**配置增强**
+- `config.MemoryConfig` 新增: `embedding_provider`, `llm_provider`, `retrieval_mode`, `summary_mode`, `default_ttl_days` 等
+- `config.example.json` 新增所有新配置项
+
+**测试**
+- 59 项新增测试覆盖所有 4 项任务
+- FakeProvider 确保测试无需网络/API key
+- 145/148 测试通过 (3 预存失败: `plugin.json` 路径变更)
+
+**向后兼容**
+- 旧 `index.json` 记录兼容读取（缺失字段默认填充）
+- `save_memory()`, `retrieve_memory()`, `format_context()` 签名向后兼容
+- `EmbeddingRetriever` 别名兼容
+- 降级: LLM/Embedding 不可用时自动 fallback 到规则实现
+
+---
+
 ## v0.5.2 — 记忆更新与时间记录增强 (2026-06-12)
 
 **新增**

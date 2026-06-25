@@ -1,6 +1,9 @@
-# MVP 核心依赖：仅需 Python 标准库。
-#
-# 可选依赖（增强中文关键词抽取）：
-#   pip install jieba
-#
-# 不安装 jieba 时自动回退到正则规则法，不影响核心功能。
+# v0.6.0 可选依赖
+
+# 中文分词增强（v0.2.0+）
+jieba
+
+# Embedding / LLM Provider 的可选 HTTP 客户端（v0.6.0+）
+# 若使用 OpenAI-compatible API 需要以下之一:
+# httpx
+# 或使用标准库 urllib（无需额外安装）

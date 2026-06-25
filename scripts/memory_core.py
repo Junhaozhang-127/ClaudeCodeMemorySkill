@@ -14,6 +14,7 @@ Phase 4 增强：
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -32,10 +33,21 @@ except ImportError:
 
 # ── Phase 4 模块（项目内导入）────────────────────────────────
 try:
-    from retrieval import HybridRetriever, KeywordRetriever
+    from retrieval import (
+        HybridRetriever, KeywordRetriever, SemanticRetriever,
+        EmbeddingRetriever,
+    )
     _RETRIEVAL_AVAILABLE = True
 except ImportError:
     _RETRIEVAL_AVAILABLE = False
+
+# embedding provider (v0.6.0)
+try:
+    from embedding_provider import get_embedding_provider
+    _EMBEDDING_AVAILABLE = True
+except ImportError:
+    _EMBEDDING_AVAILABLE = False
+    def get_embedding_provider(*a, **kw): return None
 
 try:
     from logging_utils import log_save, log_retrieve, log_rebuild, log_warning, log_error
@@ -119,6 +131,22 @@ class MemoryRecord:
     updated_at: str
     decisions: list[str] = field(default_factory=list)
     todos: list[str] = field(default_factory=list)
+    # v0.6.0: 扩展 schema 字段
+    memory_id: str = ""
+    tags: list[str] = field(default_factory=list)
+    source: str = ""
+    last_accessed_at: str = ""
+    access_count: int = 0
+    confidence: float = 1.0
+    importance: int = 0
+    status: str = "active"
+    expires_at: str = ""
+    merged_into: str = ""
+    content_hash: str = ""
+    embedding_hash: str = ""
+    embedding_model: str = ""
+    ttl_days: int = 365
+    lifecycle_reason: str = ""
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -522,6 +550,14 @@ def save_memory(
     else:
         filepath.write_text(block, encoding="utf-8")
 
+    # content hash for dedup
+    ch = hashlib.sha256(conversation_text.encode("utf-8")).hexdigest()[:16]
+
+    # 生命周期配置
+    from config import get_config
+    cfg = get_config()
+    ttl = cfg.default_ttl_days
+
     record = MemoryRecord(
         topic=topic,
         file=str(filepath.relative_to(PROJECT_ROOT)),
@@ -531,7 +567,17 @@ def save_memory(
         todos=merged_todos,
         created_at=created_at,
         updated_at=now,
+        content_hash=ch,
+        status="active",
+        ttl_days=ttl,
     )
+    # 如果是更新现有记录，保留部分旧字段
+    if existing:
+        record.access_count = existing.get("access_count", 0)
+        record.last_accessed_at = now
+        record.importance = existing.get("importance", 0)
+        record.tags = existing.get("tags", [])
+        record.source = existing.get("source", "")
     index[safe_topic] = asdict(record)
     save_index(index, workspace)
 
@@ -652,21 +698,73 @@ def retrieve_memory(
     top_k: int = 5,
     workspace: str = "",
     retriever=None,
+    mode: str = "hybrid",
+    embedding_provider=None,
+    tags: list[str] | None = None,
+    include_expired: bool = False,
 ) -> list[dict]:
+    """检索相关记忆。
+
+    Args:
+        query: 查询文本。
+        top_k: 返回结果数量。
+        workspace: workspace 名称。
+        retriever: 可选的外部检索器实例。
+        mode: "keyword" / "semantic" / "hybrid"。
+        embedding_provider: EmbeddingProvider 实例（semantic/hybrid 模式需要）。
+        tags: 按标签过滤（未实现时忽略）。
+        include_expired: 是否包含已过期记忆。
+
+    Returns:
+        按相关性排序的结果列表。
+    """
     index = load_index(workspace)
-    # 将 index key 注入为 id，确保每条记录可追溯和去重
     records = []
     for key, val in index.items():
         val["id"] = key
+        # 过滤过期记忆（除非显式包含）
+        if not include_expired:
+            status = val.get("status", "active")
+            if status in ("expired", "deleted"):
+                continue
+        # 过滤已归档（默认不检索，除非 include_expired）
+        if val.get("status") == "archived" and not include_expired:
+            continue
         records.append(val)
 
-    if retriever is None and _RETRIEVAL_AVAILABLE:
-        retriever = HybridRetriever(score_fn=score_record)
-
     if retriever is not None:
-        results = retriever.retrieve(query, records, top_k)
+        chosen = retriever
+    elif _RETRIEVAL_AVAILABLE and mode in ("semantic", "hybrid"):
+        # 尝试获取 embedding provider
+        prov = embedding_provider
+        if prov is None and _EMBEDDING_AVAILABLE:
+            try:
+                prov = get_embedding_provider(provider="auto")
+            except Exception:
+                prov = None
+        if prov is None and mode == "semantic":
+            # 无法使用语义检索，降级
+            import logging
+            logging.getLogger("claude_memory").warning(
+                "Embedding provider 不可用，semantic 模式降级为 keyword"
+            )
+            mode = "keyword"
+        if prov is not None or mode == "hybrid":
+            chosen = HybridRetriever(
+                score_fn=score_record,
+                semantic_provider=prov,
+                mode=mode,
+            )
+        else:
+            chosen = HybridRetriever(score_fn=score_record, mode="keyword")
+    elif _RETRIEVAL_AVAILABLE:
+        chosen = HybridRetriever(score_fn=score_record, mode="keyword")
     else:
-        # 回退：使用原有 score_record 逻辑
+        chosen = None
+
+    if chosen is not None:
+        results = chosen.retrieve(query, records, top_k)
+    else:
         results = _legacy_retrieve(query, records, top_k)
 
     # 路径校验 + 读取内容 + 过滤越界记录 + 去重
@@ -907,7 +1005,14 @@ def rebuild_index(workspace: str = "") -> dict:
             if updated > existing.get("updated_at", ""):
                 existing["updated_at"] = updated
                 existing["file"] = str(path.relative_to(PROJECT_ROOT))
+            # 补齐新字段
+            existing.setdefault("status", "active")
+            existing.setdefault("content_hash", "")
+            existing.setdefault("ttl_days", 365)
+            existing.setdefault("access_count", 0)
+            existing.setdefault("tags", [])
         else:
+            ch = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
             index[key] = asdict(MemoryRecord(
                 topic=topic,
                 file=str(path.relative_to(PROJECT_ROOT)),
@@ -917,6 +1022,8 @@ def rebuild_index(workspace: str = "") -> dict:
                 todos=todos,
                 created_at=created,
                 updated_at=updated,
+                content_hash=ch,
+                status="active",
             ))
 
     save_index(index, workspace)
