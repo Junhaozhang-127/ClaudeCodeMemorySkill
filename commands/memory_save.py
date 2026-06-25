@@ -1,5 +1,5 @@
 """
-commands/memory_save.py — /memory save 命令处理器 (v0.6.0)
+commands/memory_save.py — /memory save 命令处理器 (v0.7.0)
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ SAVE_COMMAND = Command(
     name="memory:save",
     aliases=["memory-save", "/memory-save", "save"],
     description="保存当前对话为结构化 Markdown 记忆",
-    usage="/memory save <主题> [--text <内容>] [--file <路径>] [--summary-mode rule|llm|auto]",
+    usage="/memory save <主题> [--text <内容>] [--file <路径>] [--summary-mode rule|llm|auto] [--session-id <id>]",
     args_schema={
         "topic": {"type": "string", "required": True,
                   "description": "记忆主题"},
@@ -24,16 +24,18 @@ SAVE_COMMAND = Command(
                        "description": "覆盖而非追加（默认: false）"},
         "workspace": {"type": "string", "required": False,
                        "description": "workspace 名称"},
+        "session_id": {"type": "string", "required": False,
+                        "description": "目标会话 ID（默认: 当前会话）"},
+        "allow_archived": {"type": "bool", "required": False,
+                            "description": "允许写入已归档会话"},
     },
-    handler=None,  # set below after import
+    handler=None,
 )
 
 
 def _handler(args: dict) -> CommandResult:
-    """执行记忆保存命令。"""
     import sys
     import os
-    # Ensure scripts/ is importable
     _scripts = os.path.join(os.path.dirname(__file__), "..", "scripts")
     sys.path.insert(0, os.path.abspath(_scripts))
 
@@ -60,8 +62,9 @@ def _handler(args: dict) -> CommandResult:
     summary_mode = args.get("summary_mode", "rule")
     append = not args.get("no_append", False)
     workspace = args.get("workspace", "")
+    session_id = args.get("session_id", None)
+    allow_archived = bool(args.get("allow_archived", False))
 
-    # LLM summarizer support
     summarizer = None
     if summary_mode in ("llm", "auto"):
         try:
@@ -71,14 +74,18 @@ def _handler(args: dict) -> CommandResult:
             kw_fn = _get_keyword_fn()
             summarizer = LLMSummarizer(provider=provider, keyword_extractor=kw_fn)
         except Exception:
-            pass  # 自动降级到 rule fallback
+            pass
 
     try:
-        path = save_memory(topic, text, append=append, workspace=workspace,
-                          summarizer=summarizer)
+        path = save_memory(
+            topic, text, append=append, workspace=workspace,
+            summarizer=summarizer, session_id=session_id,
+            allow_archived=allow_archived,
+        )
         return CommandResult(
             ok=True,
-            data={"file": str(path), "topic": topic},
+            data={"file": str(path), "topic": topic,
+                  "session_id": session_id or "current"},
             message=f"记忆已保存: {path}",
         )
     except Exception as e:

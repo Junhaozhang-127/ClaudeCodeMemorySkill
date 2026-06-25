@@ -1,8 +1,8 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "claude-code-memory-skill",
-  "version": "0.6.0",
-  "description": "Claude Code 会话记忆 Skill — 轻量级本地 Markdown 记忆库，支持语义检索、LLM 摘要、生命周期管理",
+  "version": "0.7.0",
+  "description": "Claude Code 会话记忆 Skill — 语义检索、LLM 摘要、会话空间管理、链接检索、交互式 TUI",
   "author": {
     "name": "Junhaozhang-127",
     "url": "https://github.com/Junhaozhang-127"
@@ -36,6 +36,12 @@
       "usage": "/memory manage <action> [options]  actions: quality / dedup / expire / merge / archive",
       "script": "scripts/memory_maintenance.py",
       "handler": "commands.memory_manage:MANAGE_COMMAND"
+    },
+    "memory:session": {
+      "description": "会话空间管理 — 创建、切换、重命名、归档、删除、恢复、查看会话",
+      "usage": "/memory session <action> [options]  actions: list / create / current / use / rename / archive / delete / restore / info",
+      "script": "scripts/session_cli.py",
+      "handler": "commands.memory_session:SESSION_COMMAND"
     }
   },
 

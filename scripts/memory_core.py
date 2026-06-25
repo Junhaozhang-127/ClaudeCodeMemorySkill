@@ -147,6 +147,9 @@ class MemoryRecord:
     embedding_model: str = ""
     ttl_days: int = 365
     lifecycle_reason: str = ""
+    # v0.7.0: session workspace
+    session_id: str = "default"
+    session_title: str = ""
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -457,6 +460,8 @@ def save_memory(
     append: bool = True,
     summarizer=None,
     workspace: str = "",
+    session_id: str | None = None,
+    allow_archived: bool = False,
 ) -> Path:
     """保存一条记忆到 Markdown 文件并更新索引。
 
@@ -465,7 +470,14 @@ def save_memory(
       - 合并 keywords / decisions / todos（去重）
       - 保留原始 created_at，刷新 updated_at
       - 在文件末尾追加新的对话块
+
+    v0.7.0: session_id 为 None 时自动使用当前会话。
     """
+    # ── 解析 session ──────────────────────────────────────────
+    resolved_session_id, session_title = _resolve_save_session(
+        session_id, allow_archived
+    )
+
     ensure_memory_dirs(workspace)
     _, topics_dir, index_file = _resolve_paths(workspace)
 
@@ -570,6 +582,8 @@ def save_memory(
         content_hash=ch,
         status="active",
         ttl_days=ttl,
+        session_id=resolved_session_id,
+        session_title=session_title,
     )
     # 如果是更新现有记录，保留部分旧字段
     if existing:
@@ -578,11 +592,77 @@ def save_memory(
         record.importance = existing.get("importance", 0)
         record.tags = existing.get("tags", [])
         record.source = existing.get("source", "")
+        # 保留旧 session_id（不覆盖已有归属）
+        if existing.get("session_id"):
+            record.session_id = existing["session_id"]
+            record.session_title = existing.get("session_title", "")
     index[safe_topic] = asdict(record)
     save_index(index, workspace)
 
+    # ── 镜像写入 session memories.jsonl ─────────────────────
+    _mirror_to_session_jsonl(resolved_session_id, record)
+
     log_save(topic, str(filepath), workspace)
     return filepath
+
+
+def _resolve_save_session(
+    session_id: str | None, allow_archived: bool
+) -> tuple[str, str]:
+    """解析保存目标 session。返回 (session_id, session_title)。
+
+    规则:
+      1. 显式 session_id → 验证 session 存在且可写。
+      2. None → 使用当前 session (调用 SessionManager)。
+      3. deleted → 拒绝。
+      4. archived → 默认拒绝，allow_archived=True 允许。
+    """
+    try:
+        from session_manager import get_session_manager, SessionStatus
+        mgr = get_session_manager()
+    except ImportError:
+        return "default", ""
+
+    sid = session_id
+    if sid is None:
+        sid = mgr.get_current_session().session_id
+
+    manifest = mgr.get_session(sid)
+    if manifest is None:
+        raise ValueError(f"会话不存在: {sid}")
+
+    if manifest.status == SessionStatus.DELETED:
+        raise ValueError(f"不能写入已删除的会话: {sid}。请先 restore。")
+
+    if manifest.status == SessionStatus.ARCHIVED and not allow_archived:
+        raise ValueError(
+            f"不能写入已归档的会话: {sid}。使用 allow_archived=True 允许。"
+        )
+
+    return sid, manifest.title
+
+
+def _mirror_to_session_jsonl(session_id: str, record: MemoryRecord) -> None:
+    """将会话记忆镜像写入 .memory/sessions/<id>/memories.jsonl。"""
+    try:
+        from session_manager import get_session_manager
+        mgr = get_session_manager()
+        session_dir = mgr.get_session_path(session_id)
+        jsonl_path = session_dir / "memories.jsonl"
+        entry = asdict(record)
+        with jsonl_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        # 更新 memory_count
+        manifest = mgr.get_session(session_id)
+        if manifest:
+            manifest.memory_count += 1
+            manifest.last_accessed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            mgr._save_manifest(manifest)
+            mgr._update_manifest_in_index(manifest)
+            mgr._log_event(session_id, "memory_saved",
+                          {"topic": record.topic, "file": record.file})
+    except (ImportError, OSError):
+        pass  # 非关键路径，静默降级
 
 
 def _format_list_section(items: list[str], fallback: str) -> str:
@@ -693,6 +773,71 @@ def _safe_get_list(record: dict, key: str) -> list[str]:
     return val if isinstance(val, list) else []
 
 
+def _resolve_retrieve_sessions(
+    session_id: str | None,
+    all_sessions: bool,
+    include_archived_sessions: bool,
+    include_deleted_sessions: bool,
+    include_linked_sessions: bool,
+) -> set[str] | None:
+    """解析检索目标 session 集合。返回 None 表示不过滤（全量）。"""
+    try:
+        from session_manager import get_session_manager, SessionStatus
+        mgr = get_session_manager()
+    except ImportError:
+        return None  # SessionManager 不可用 → 全量
+
+    # all_sessions 优先
+    if all_sessions:
+        allowed = {SessionStatus.ACTIVE}
+        if include_archived_sessions:
+            allowed.add(SessionStatus.ARCHIVED)
+        if include_deleted_sessions:
+            allowed.add(SessionStatus.DELETED)
+        sessions = mgr.list_sessions(
+            include_archived=include_archived_sessions,
+            include_deleted=include_deleted_sessions,
+        )
+        return {s.session_id for s in sessions if s.status in allowed}
+
+    # 确定 source session
+    if session_id is None:
+        try:
+            curr = mgr.get_current_session()
+            source_id = curr.session_id
+        except Exception:
+            source_id = "default"
+    else:
+        source_id = session_id
+
+    # 基础 scope: source session only
+    target_ids = {source_id}
+
+    # linked sessions
+    if include_linked_sessions:
+        try:
+            linked_ids = mgr.get_linked_session_ids(
+                source_id,
+                include_archived=include_archived_sessions,
+            )
+            target_ids.update(linked_ids)
+        except Exception:
+            pass  # links.json 损坏 → 只检索 source，安全降级
+
+    return target_ids
+
+
+def _lookup_session_title(session_id: str) -> str:
+    """按 session_id 查找标题。"""
+    try:
+        from session_manager import get_session_manager
+        mgr = get_session_manager()
+        m = mgr.get_session(session_id)
+        return m.title if m else ""
+    except ImportError:
+        return ""
+
+
 def retrieve_memory(
     query: str,
     top_k: int = 5,
@@ -702,6 +847,12 @@ def retrieve_memory(
     embedding_provider=None,
     tags: list[str] | None = None,
     include_expired: bool = False,
+    # v0.7.0: session 过滤
+    session_id: str | None = None,
+    all_sessions: bool = False,
+    include_archived_sessions: bool = False,
+    include_deleted_sessions: bool = False,
+    include_linked_sessions: bool = False,
 ) -> list[dict]:
     """检索相关记忆。
 
@@ -714,14 +865,36 @@ def retrieve_memory(
         embedding_provider: EmbeddingProvider 实例（semantic/hybrid 模式需要）。
         tags: 按标签过滤（未实现时忽略）。
         include_expired: 是否包含已过期记忆。
+        session_id: 只检索指定会话（None=current）。
+        all_sessions: 检索所有活跃会话。
+        include_archived_sessions: all_sessions 时包含已归档会话。
+        include_deleted_sessions: 包含已删除会话（维护用）。
+        include_linked_sessions: 包含已链接会话（Phase 4 实现）。
 
     Returns:
         按相关性排序的结果列表。
     """
+    # ── 解析 session scope ───────────────────────────────────
+    target_session_ids = _resolve_retrieve_sessions(
+        session_id=session_id,
+        all_sessions=all_sessions,
+        include_archived_sessions=include_archived_sessions,
+        include_deleted_sessions=include_deleted_sessions,
+        include_linked_sessions=include_linked_sessions,
+    )
+
     index = load_index(workspace)
     records = []
     for key, val in index.items():
         val["id"] = key
+        # session 过滤
+        rec_session = val.get("session_id", "default") or "default"
+        if target_session_ids is not None and rec_session not in target_session_ids:
+            continue
+        val["source_session"] = rec_session
+        # 补充 session_title
+        if not val.get("session_title"):
+            val["session_title"] = _lookup_session_title(rec_session)
         # 过滤过期记忆（除非显式包含）
         if not include_expired:
             status = val.get("status", "active")
@@ -796,6 +969,20 @@ def retrieve_memory(
             continue
         if rid:
             seen_ids.add(rid)
+        # 注入 session 信息
+        r["source_session"] = r.get("source_session",
+                                     r.get("session_id", "default"))
+        # 判断 retrieval_scope
+        if all_sessions:
+            r["retrieval_scope"] = "all sessions"
+        elif include_linked_sessions and target_session_ids:
+            # 区分 source vs linked
+            source_id = next(iter(target_session_ids)) if target_session_ids else ""
+            r["is_linked_session"] = r["source_session"] != source_id
+            r["retrieval_scope"] = (f"session:{source_id}" + "+linked"
+                                     if r["is_linked_session"] else "linked sessions")
+        else:
+            r["retrieval_scope"] = f"session:{r['source_session']}"
         validated.append(r)
 
     log_retrieve(query, top_k, len(validated), workspace)
@@ -828,6 +1015,21 @@ def format_context(results: Iterable[dict], max_chars_per_item: int = 1200) -> s
     优先展示：摘要 → 关键决策 → 待办事项 → 内容片段。
     max_chars_per_item 控制每条完整块的近似最大长度。
     """
+    # 检测检索范围
+    session_ids = set()
+    for item in results:
+        sid = item.get("source_session", "") or item.get("session_id", "")
+        if sid:
+            session_ids.add(sid)
+
+    scope_line = ""
+    if len(session_ids) == 1:
+        sid = next(iter(session_ids))
+        title = item.get("session_title", "") if 'item' in dir() else ""
+        scope_line = f"[session: {sid}]"
+    elif len(session_ids) > 1:
+        scope_line = f"[sessions: {len(session_ids)}]"
+
     blocks = []
     for i, item in enumerate(results, start=1):
         topic = item.get("topic", "未知主题")
@@ -838,6 +1040,9 @@ def format_context(results: Iterable[dict], max_chars_per_item: int = 1200) -> s
         todos = _safe_get_list(item, "todos")
         score_breakdown = item.get("score_breakdown", {})
         matched = item.get("matched_fields", [])
+        source_session = item.get("source_session", "") or item.get("session_id", "")
+        session_title = item.get("session_title", "")
+        is_linked = item.get("is_linked_session", False)
 
         parts: list[str] = []
         remaining = max_chars_per_item
@@ -887,8 +1092,10 @@ def format_context(results: Iterable[dict], max_chars_per_item: int = 1200) -> s
             parts.append(f"**内容**：{content}")
 
         body = "\n".join(parts)
+        session_tag = f" [session: {source_session}]" if source_session else ""
+        linked_tag = " [linked]" if is_linked else ""
         blocks.append(
-            f"""## 相关记忆 {i}: {topic}
+            f"""## 相关记忆 {i}: {topic}{session_tag}{linked_tag}
 
 文件：{file_path}
 相关分：{score}
@@ -900,7 +1107,14 @@ def format_context(results: Iterable[dict], max_chars_per_item: int = 1200) -> s
     if not blocks:
         return "未检索到相关历史记忆。"
 
-    return "# Claude Code Memory Context\n\n" + "\n\n".join(blocks)
+    header = "# Claude Code Memory Context\n\n"
+    if len(session_ids) == 1:
+        sid = next(iter(session_ids))
+        header += f"**Retrieval scope**: session:{sid}\n\n"
+    elif len(session_ids) > 1:
+        header += f"**Retrieval scope**: all sessions ({len(session_ids)} sessions)\n\n"
+
+    return header + "\n\n".join(blocks)
 
 
 # ═══════════════════════════════════════════════════════════════

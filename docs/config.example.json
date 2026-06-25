@@ -18,5 +18,9 @@
   "auto_save_interval": 10,
   "default_ttl_days": 365,
   "short_term_ttl_days": 30,
-  "auto_expire_enabled": false
+  "auto_expire_enabled": false,
+  "session_enabled": true,
+  "session_root": ".memory/sessions",
+  "default_session_id": "default",
+  "session_auto_create_default": true
 }

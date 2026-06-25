@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.7.0 — Session Workspace Manager (2026-06-25)
+
+**新增**
+- Session Workspace Core: `SessionManager` (create/list/use/rename/archive/delete/restore), `SessionManifest`, `SessionIndex`, `CurrentSession`, `SessionEvent`
+- Session CLI (`scripts/session_cli.py`) + Slash Command (`/memory session`): 12 actions (list/create/current/use/rename/archive/delete/restore/info/link/unlink/links/tui)
+- `memory_core` session-aware integration: `save_memory` auto-detects current session, `retrieve_memory` supports `session_id`/`all_sessions`/`include_linked_sessions`/`include_archived_sessions` filters
+- Linked Session Retrieval: explicit `link_session`/`unlink_session`, `links.json` data model, `include_linked_sessions=True` retrieval scope
+- Interactive Session TUI: `session_cli.py tui`, keyboard navigation (arrow keys/Enter/Delete/N/R/A/L), soft-delete confirmation, non-TTY fallback
+- Session directory structure: `.memory/sessions/<id>/` with `manifest.json`, `memories.jsonl`, `links.json`, `events.jsonl`
+- `MemoryRecord` extended with `session_id`/`session_title`
+
+**向后兼容**
+- Existing memories without `session_id` default to `"default"` session
+- Existing `save_memory`/`retrieve_memory`/`format_context` signatures unchanged
+- Existing v0.6.0 commands (save/retrieve/rebuild/manage) remain available
+- `config.example.json` synchronized with new session config keys
+
+**测试**
+- 352 passed / 0 failed / 3 skipped (v0.6.0: 153 → v0.7.0: +199 tests across 5 phases)
+
+---
+
 ## v0.6.0 — 语义检索 + LLM 摘要 + 命令系统升级 + 记忆生命周期 (2026-06-25)
 
 **新增 (Task 1: EmbeddingRetriever)**

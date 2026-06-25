@@ -122,8 +122,10 @@ def _register_builtins(registry: CommandRegistry) -> None:
     from commands.memory_retrieve import RETRIEVE_COMMAND
     from commands.memory_rebuild import REBUILD_COMMAND
     from commands.memory_manage import MANAGE_COMMAND
+    from commands.memory_session import SESSION_COMMAND
 
     registry.register(SAVE_COMMAND)
     registry.register(RETRIEVE_COMMAND)
     registry.register(REBUILD_COMMAND)
     registry.register(MANAGE_COMMAND)
+    registry.register(SESSION_COMMAND)

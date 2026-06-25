@@ -6,9 +6,9 @@ version.py — 项目版本与元信息
 
 from __future__ import annotations
 
-__version__ = "0.6.0"
-PHASE = "Phase 6"
-BUILD_STATUS = "development"
+__version__ = "0.7.0"
+PHASE = "Phase 7"
+BUILD_STATUS = "release"
 
 
 def get_version_info() -> dict:

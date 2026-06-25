@@ -52,6 +52,11 @@ class MemoryConfig:
     default_ttl_days: int = 365           # 默认 TTL（天），0=永不过期
     short_term_ttl_days: int = 30         # 短期记忆 TTL
     auto_expire_enabled: bool = False     # 是否在 save 时自动检查过期
+    # v0.7.0: session workspace
+    session_enabled: bool = True                      # 是否启用会话空间
+    session_root: str = ".memory/sessions"            # 会话根目录（相对）
+    default_session_id: str = "default"               # 默认会话 ID
+    session_auto_create_default: bool = True           # 是否自动创建 default session
 
     @property
     def is_legacy_mode(self) -> bool:
