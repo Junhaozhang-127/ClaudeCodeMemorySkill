@@ -2,74 +2,124 @@
 
 # Claude Code Memory Skill
 
-Lightweight local memory bank for Claude Code — automatically saves sessions as structured Markdown and retrieves historical context in new sessions.
+Lightweight local memory & session workspace for Claude Code — semantic retrieval, LLM summarization, session management, interactive TUI.
+
+**v0.7.0** — 352 tests, zero failures.
 
 ## Why You Need It
 
-Each Claude Code session is isolated. When you switch sessions, all prior project context, bug analyses, and design decisions are lost, forcing you to manually repeat yourself.
+Claude Code sessions are isolated. When you switch sessions, project context, bug analyses, and design decisions are lost.
 
-This skill automatically distills conversations into structured memories (summaries, key decisions, TODOs) at session end, and auto-retrieves relevant context based on your input in new sessions.
+This skill saves conversations as structured memories, retrieves them via semantic/hybrid search, manages session workspaces, and provides an interactive TUI for session navigation.
 
 ## Installation
 
 ```bash
-git clone https://github.com/Junhaozhang-127/ClaudeMeory.git
-cd ClaudeMeory
-python scripts/install.py --interactive
+git clone https://github.com/Junhaozhang-127/ClaudeCodeMemorySkill.git
+cd ClaudeCodeMemorySkill
+pip install jieba              # optional: enhanced Chinese word segmentation
 ```
 
-On first run, you'll be prompted to choose a memory storage path — press Enter for the default.
-
-**Requirements**: Python 3.7+, zero core dependencies. Optional: `pip install jieba` for enhanced Chinese word segmentation.
+**Requirements**: Python 3.7+. Zero core dependencies. Optional: `jieba` for Chinese NLP.
 
 ## Quick Start
 
 ```bash
-# Save a memory
+# Save a memory (auto-detects current session)
 python scripts/summarize_session.py --topic "Architecture Discussion" --text "Decided to use microservices..."
 
-# Retrieve relevant memories
+# Retrieve with keyword mode
 python scripts/retrieve_memory.py --query "architecture plan"
 
-# View JSON output (with score breakdown)
-python scripts/retrieve_memory.py --query "architecture" --json
+# Retrieve with semantic search (requires EMBEDDING_API_KEY)
+python scripts/retrieve_memory.py --query "architecture" --mode semantic --json
 
-# Rebuild index
-python scripts/update_index.py
+# Retrieve with hybrid mode (keyword + semantic)
+python scripts/retrieve_memory.py --query "architecture" --mode hybrid
+
+# Retrieve from all sessions
+python scripts/retrieve_memory.py --query "architecture" --all-sessions
+
+# Retrieve with linked sessions
+python scripts/retrieve_memory.py --query "architecture" --include-linked-sessions
+
+# Session management
+python scripts/session_cli.py create --title "Project Alpha" --use
+python scripts/session_cli.py list
+python scripts/session_cli.py current
+python scripts/session_cli.py tui       # Interactive session selector
 ```
 
-## Core Capabilities
+## Core Capabilities (v0.7.0)
 
-### Structured Memory
-Automatically extracts summaries, key decisions, and TODOs from conversations into structured Markdown memory files. Each memory records both **creation time** and **last update time** for clear traceability.
-
-### Intelligent Update & Merge
-Saving to the same topic intelligently updates the existing memory: keywords, decisions, and TODOs are merged (with deduplication), the `created_at` timestamp is preserved, and `updated_at` is refreshed. New conversation blocks are appended to the same file — no duplicate files.
-
-### Hybrid Retrieval
-Multi-signal weighted scoring (topic > keywords > decisions > TODOs > summary), returning interpretable `score_breakdown` results.
-
-### Workspace Isolation
-Memory directories are isolated per project — different projects never interfere.
+### Semantic & Hybrid Retrieval (v0.6.0)
+Three retrieval modes: `keyword`, `semantic`, `hybrid`. Embedding vector similarity search with automatic fallback. Supports OpenAI-compatible API (set `EMBEDDING_API_KEY`) or zero-config fake provider.
 
 ```bash
-python scripts/workspace_manager.py init --workspace my-project
-python scripts/summarize_session.py --workspace my-project --topic "..." --text "..."
+python scripts/retrieve_memory.py --query "..." --mode hybrid
 ```
 
-### Hook Automation
-Auto-save at session end, auto-retrieve at session start. Features a **turn-based auto-save timer** that saves your conversation every N turns (default 10) — no need to wait until session end.
+### LLM Summarization (v0.6.0)
+Three summary types: `brief`, `semantic`, `memory`. Chunk-merge for long texts. Fallback to rule-based summarizer when no LLM key is configured.
 
 ```bash
-# Configure auto-save interval
-export MEMORY_AUTO_SAVE_INTERVAL=5   # Save every 5 turns
-export MEMORY_AUTO_SAVE_INTERVAL=0   # Disable turn-based auto-save
+python scripts/summarize_session.py --topic "..." --text "..." --summary-mode llm
 ```
 
-Supports bash / Windows CMD / PowerShell. See `docs/HOOK_SETUP.md` for details.
+### Slash Command System (v0.6.0)
+CommandRegistry with 5 slash commands: `memory:save`, `memory:retrieve`, `memory:rebuild`, `memory:manage`, `memory:session`. Argument validation, structured results, edit-distance suggestions.
+
+```bash
+/memory save "Architecture" --text "We decided to use microservices"
+/memory retrieve "architecture" --mode hybrid --all-sessions
+/memory session create --title "Book Review" --use
+/memory session tui     # Interactive TUI
+```
+
+### Memory Lifecycle (v0.6.0)
+Extended MemoryRecord schema (23 fields). Status state machine: `active` → `archived` / `expired` / `merged` / `deleted`. TTL-based auto-expiry, content-hash dedup, quality reports.
+
+```bash
+python scripts/memory_maintenance.py detect-duplicates
+python -c "from memory_lifecycle import generate_quality_report; print(generate_quality_report())"
+```
+
+### Session Workspace Manager (v0.7.0)
+Per-session directories with manifest, memories, links, events. Full lifecycle: create, list, rename, archive, soft-delete, restore.
+
+```bash
+python scripts/session_cli.py create --title "Paper Review" --use
+python scripts/session_cli.py list
+python scripts/session_cli.py info --session-id <id>
+python scripts/session_cli.py delete --session-id <id>
+python scripts/session_cli.py restore --session-id <id>
+```
+
+### Session-Aware Memory (v0.7.0)
+`save_memory` auto-detects current session. `retrieve_memory` defaults to current session scope. Supports `--session-id`, `--all-sessions`, `--include-archived-sessions`, `--include-linked-sessions`.
+
+### Linked Sessions (v0.7.0)
+Explicit session linking via `links.json`. Retrieval with `include_linked_sessions=True` expands scope to linked sessions.
+
+```bash
+python scripts/session_cli.py link --to <target_session_id> --reason "related"
+python scripts/session_cli.py unlink --to <target_session_id>
+python scripts/session_cli.py links
+```
+
+### Interactive Session TUI (v0.7.0)
+Terminal-based session selector with keyboard navigation: UP/DOWN, Enter, Delete, N, R, A, L, Q. Soft-delete with double-press confirmation.
+
+```bash
+python scripts/session_cli.py tui
+python scripts/session_cli.py tui --include-archived
+```
+
+### Structured Memory & Auto-Save
+Auto-extracts summaries, decisions, and TODOs. Turn-based auto-save (every N turns). Intelligent merge on same topic. Hook scripts for bash/bat/ps1.
 
 ### Memory Maintenance
-Deduplication, merging, compaction, archiving — all with dry-run protection.
+Dedup, merge, compact, archive — all with dry-run protection.
 
 ```bash
 python scripts/memory_maintenance.py detect-duplicates
@@ -77,49 +127,52 @@ python scripts/memory_maintenance.py compact --topic "..." --dry-run
 python scripts/memory_maintenance.py archive-old --days 180 --dry-run
 ```
 
-### Release Tools
-
-| Command | Purpose |
-|---------|---------|
-| `install.py` | Installation & initialization |
-| `uninstall.py` | Safe uninstallation |
-| `upgrade.py` | Upgrade & migration |
-| `health_check.py` | System health diagnostics |
-| `memory_stats.py` | Memory bank statistics |
-| `release_prepare.py` | Pre-release cleanup |
-| `run_acceptance.py` | Acceptance tests |
-
-## Project Structure
+## Project Structure (v0.7.0)
 
 ```text
 ClaudeMeory/
-├── scripts/          # Core Python scripts
-├── hooks/            # Hook scripts (bash/bat/ps1)
-│   ├── pre_prompt.*      # Retrieve on input
-│   ├── post_conversation.* # Save on session end
-│   └── auto_save.*       # Turn-based auto-save timer
-├── memory/           # Memory storage directory
-│   ├── index.json        # Topic index
-│   ├── .turn_state.json  # Auto-save turn counter
-│   └── topics/           # Markdown memory files
-├── docs/             # Documentation
-│   ├── CAPABILITY_MATRIX.md    # Capability matrix
-│   ├── DEVELOPMENT_ROADMAP.md  # Development roadmap
-│   ├── HOOK_SETUP.md           # Hook configuration guide
-│   ├── PROJECT_STRUCTURE.md    # Architecture overview
-│   └── SUMMARIZER_DESIGN.md    # Summarizer design
-├── tests/            # Tests (78 items)
-├── plugin.json       # Plugin Manifest
-├── install.sh        # One-click install
-├── CHANGELOG.md      # Changelog
-└── LICENSE           # MIT
+├── scripts/                # Core Python (20+ modules)
+│   ├── memory_core.py          # Memory save/retrieve/format core
+│   ├── retrieval.py            # Keyword/Hybrid/Semantic retrievers
+│   ├── summarizers.py          # RuleBased/LLM summarizers
+│   ├── embedding_provider.py   # EmbeddingProvider ABC + Fake/OpenAI
+│   ├── llm_provider.py         # LLMProvider ABC + Fake/OpenAI
+│   ├── memory_lifecycle.py     # Lifecycle state machine + quality report
+│   ├── session_manager.py      # Session CRUD + link + events
+│   ├── session_tui.py          # Interactive session selector
+│   ├── session_cli.py          # Session CLI entry
+│   └── ...
+├── commands/               # Slash command handlers (v0.6.0)
+│   ├── base.py                 # Command + CommandResult
+│   ├── registry.py             # CommandRegistry
+│   ├── memory_save.py          # /memory save
+│   ├── memory_retrieve.py      # /memory retrieve
+│   ├── memory_rebuild.py       # /memory rebuild
+│   ├── memory_manage.py        # /memory manage
+│   └── memory_session.py       # /memory session (12 actions)
+├── hooks/                  # Hook scripts (bash/bat/ps1)
+├── .claude-plugin/         # Plugin manifest + marketplace
+├── memory/                 # Memory storage
+│   ├── index.json              # Topic index
+│   ├── .memory/sessions/       # Session workspaces (v0.7.0)
+│   └── topics/                 # Markdown memory files
+├── docs/                   # Documentation
+│   ├── SESSION_WORKSPACE.md    # Session workspace guide
+│   ├── SMOKE_TEST.md           # Real API smoke test guide
+│   ├── releases/               # Release summaries
+│   └── ...
+├── tests/                  # 352 tests, 0 failures
+├── CHANGELOG.md
+└── LICENSE
 ```
 
 ## Testing
 
 ```bash
-python tests/test_memory_skill.py        # 78 unit tests
-python scripts/run_acceptance.py --quick # 7 acceptance tests
+python -m pytest -q                        # 352 tests (0 failed)
+python -m pytest tests/test_session_manager.py -v     # 52 session tests
+python -m pytest tests/test_session_tui.py -v         # 47 TUI tests
+python scripts/run_acceptance.py --quick              # Acceptance tests
 ```
 
 ## Configuration
@@ -127,48 +180,60 @@ python scripts/run_acceptance.py --quick # 7 acceptance tests
 Priority: CLI arguments > environment variables > config.json > defaults
 
 ```bash
-# Environment variables
-export CLAUDE_MEMORY_WORKSPACE=my-project
-export CLAUDE_MEMORY_DIR=/path/to/memories
-export MEMORY_AUTO_SAVE_INTERVAL=10   # Auto-save every N turns (default 10)
+# Session workspace (v0.7.0)
+export SESSION_ENABLED=true
 
-# Or use config.json
-python scripts/install.py --interactive  # Interactive generation
+# Retrieval mode: keyword / semantic / hybrid
+export CLAUDE_MEMORY_RETRIEVAL_MODE=hybrid
+
+# Embedding provider (v0.6.0)
+export EMBEDDING_API_KEY=sk-...
+export EMBEDDING_API_BASE=https://api.openai.com/v1
+export EMBEDDING_MODEL=text-embedding-3-small
+
+# LLM provider (v0.6.0)
+export LLM_API_KEY=sk-...
+export LLM_API_BASE=https://api.openai.com/v1
+export LLM_MODEL=gpt-4o-mini
+
+# Auto-save
+export MEMORY_AUTO_SAVE_INTERVAL=10
 ```
 
 ## Documentation Index
 
 | Document | Content |
 |----------|---------|
+| `README.zh-CN.md` | Chinese README |
 | `SKILL.md` | Skill behavior rules & slash commands |
-| `CHANGELOG.md` | Phase 1–5 changelog |
-| `docs/CAPABILITY_MATRIX.md` | 40+ capability status table |
+| `CHANGELOG.md` | v0.1.0 – v0.7.0 changelog |
+| `docs/SESSION_WORKSPACE.md` | Session workspace guide |
+| `docs/SMOKE_TEST.md` | Real API provider smoke test |
+| `docs/CAPABILITY_MATRIX.md` | Capability status table |
 | `docs/HOOK_SETUP.md` | Hook configuration (bash/bat/ps1) |
-| `docs/PROJECT_STRUCTURE.md` | Architecture & module overview |
-| `docs/SUMMARIZER_DESIGN.md` | Pluggable summarizer design |
-| `docs/DEVELOPMENT_ROADMAP.md` | Five-phase roadmap |
-| `docs/settings.template.json` | Hook config template |
+| `docs/PROJECT_STRUCTURE.md` | Architecture overview |
+| `docs/SUMMARIZER_DESIGN.md` | Summarizer design |
+| `docs/DEVELOPMENT_ROADMAP.md` | Development roadmap |
 | `docs/config.example.json` | Config file example |
+| `docs/settings.template.json` | Hook config template |
 
 ## Known Limitations
 
-- **Plugin Manifest**: `plugin.json` is currently a manifest template, not yet validated against the official Claude Code plugin runtime.
-- **Slash Commands**: Currently mapped declaratively to CLI scripts via SKILL.md / plugin.json, not a full official `commands/` directory implementation.
-- **EmbeddingRetriever**: Currently a stub — does not provide true semantic vector retrieval. Retrieval primarily relies on keyword + multi-field weighted scoring.
-- **Storage**: Local Markdown + JSON file storage, no multi-user concurrent database.
-
-See `LIMITATIONS.md` for details.
+- **Plugin Manifest**: `.claude-plugin/plugin.json` is a manifest template, not yet validated against the official Claude Code plugin runtime.
+- **Real API E2E**: Embedding/LLM providers tested with fake providers in CI. Real API smoke test documented in `docs/SMOKE_TEST.md` but not automated.
+- **Storage**: Local Markdown + JSON + JSONL file storage, no multi-user concurrent database.
+- **Session TUI**: Tested via controller/renderer unit tests; real terminal interaction not part of automated CI.
 
 ## Security & Privacy
 
-- All memories are stored locally by default and never uploaded to any remote service.
-- Never expose API keys, passwords, tokens, or other sensitive information in conversations.
-- Use `scripts/memory_maintenance.py` to maintain or clean up memories.
+- All memories stored locally; never uploaded to remote services.
+- Never expose API keys, passwords, or tokens in conversations.
+- Embedding/LLM API keys configured via environment variables only.
 - Logs do not record full conversation transcripts.
 
-## Repository Note
+## Repository
 
-The current repository name is `ClaudeMeory` (for historical reasons). The project display name is **Claude Code Memory Skill**.
+Repository: `ClaudeCodeMemorySkill` (GitHub name `ClaudeMeory` for historical reasons).
 
 ## License
 
